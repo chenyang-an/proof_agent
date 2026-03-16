@@ -1,6 +1,6 @@
 # Proof Agent
 
-A multi-agent pipeline that takes a mathematical problem statement in LaTeX and produces a rigorous natural-language proof. The pipeline uses Claude as the underlying LLM, orchestrated through the [Agent Framework](https://github.com/microsoft/agent-framework).
+A multi-agent pipeline that takes a mathematical problem statement in LaTeX and produces a rigorous natural-language proof. The pipeline uses Claude as the underlying LLM, orchestrated through the [Agent Framework](https://github.com/microsoft/agent-framework). It certainly perform stronger than chatbot version of various models on math proving tasks, since it uses agentic loops to search and verify math proofs instead of answering question in one shot.
 
 ## How It Works
 
