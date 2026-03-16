@@ -22,15 +22,35 @@ You must perform ALL of the following verification checks:
 
 ---
 
-### 1. Problem-Proof Alignment
+### 1. Problem-Statement Integrity
 
-- Does the proof actually address the correct problem?
+**This is the most critical check.** The proof search agent may — intentionally or accidentally — alter, weaken, or re-interpret the problem statement. You must catch this.
+
+1. Read the **original** problem statement from `{problem_file}` verbatim.
+2. Identify the claim the proof **actually proves** (look at what it states at the beginning and what it concludes).
+3. Compare the two **word-by-word**. Flag ANY discrepancy, including but not limited to:
+   - Changed quantifiers (e.g. "for all" → "there exists", or an added/dropped "for all")
+   - Strengthened or weakened hypotheses (extra assumptions added, or conditions dropped)
+   - Modified constants, bounds, or inequalities (e.g. strict vs. non-strict, changed exponents)
+   - Restricted domain (e.g. proving for integers when the problem says reals)
+   - Swapped conclusion and hypothesis (proving the converse instead of the original)
+   - Subtle rephrasing that changes meaning (e.g. "at most" → "at least", "unique" dropped)
+   - Proving a special case instead of the general statement
+4. If the proof does not state the problem it is proving, that itself is a FAIL — the proof must clearly declare what it proves so the reader can verify alignment.
+
+**If the problem the proof claims to solve differs from `{problem_file}` in ANY mathematically meaningful way, this check is FAIL — regardless of whether the proof of the altered statement is correct.**
+
+---
+
+### 2. Problem-Proof Alignment
+
+- Given that the problem statement is faithfully reproduced, does the proof actually address it end-to-end?
 - Does the proof prove exactly what was asked (not something weaker or different)?
 - Are all conditions/hypotheses from the problem statement properly used?
 
 ---
 
-### 2. Logical Validity
+### 3. Logical Validity
 
 Check every logical step in the proof:
 
@@ -42,7 +62,7 @@ Check every logical step in the proof:
 
 ---
 
-### 3. Completeness
+### 4. Completeness
 
 - Are all cases covered? (If a case analysis is used, are all cases handled?)
 - Are all non-trivial claims justified? (No "clearly", "obviously", or "it is easy to see" without actual justification of non-trivial facts)
@@ -51,7 +71,7 @@ Check every logical step in the proof:
 
 ---
 
-### 4. Correctness of Mathematical Claims
+### 5. Correctness of Mathematical Claims
 
 - Are all cited theorems/results correctly stated and correctly applied?
 - Are the conditions for applying each cited result actually satisfied?
@@ -60,7 +80,7 @@ Check every logical step in the proof:
 
 ---
 
-### 5. Clarity and Rigor
+### 6. Clarity and Rigor
 
 - Is the proof written clearly enough that a knowledgeable reader can follow it?
 - Are variables properly introduced before use?
@@ -83,31 +103,39 @@ Write ALL verification results to: `{output_file}`
 
 ---
 
-## 1. Problem-Proof Alignment
+## 1. Problem-Statement Integrity
+**Status:** [PASS/FAIL]
+**Original problem (from {problem_file}):** [quote verbatim]
+**Problem as stated/implied in proof:** [quote what the proof claims to prove]
+**Discrepancies:** [list every difference, or "None — exact match"]
+
+---
+
+## 2. Problem-Proof Alignment
 **Status:** [PASS/FAIL]
 **Details:** ...
 
 ---
 
-## 2. Logical Validity
+## 3. Logical Validity
 **Status:** [PASS/FAIL]
 **Issues found:** [list each issue with the specific step number/location]
 
 ---
 
-## 3. Completeness
+## 4. Completeness
 **Status:** [PASS/FAIL]
 **Missing items:** [list any gaps]
 
 ---
 
-## 4. Correctness of Mathematical Claims
+## 5. Correctness of Mathematical Claims
 **Status:** [PASS/FAIL]
 **Errors found:** [list each error]
 
 ---
 
-## 5. Clarity and Rigor
+## 6. Clarity and Rigor
 **Status:** [PASS/FAIL]
 **Suggestions:** [list any issues]
 
@@ -117,6 +145,7 @@ Write ALL verification results to: `{output_file}`
 
 | Check | Status |
 |-------|--------|
+| Problem-Statement Integrity | [PASS/FAIL] |
 | Problem-Proof Alignment | [PASS/FAIL] |
 | Logical Validity | [PASS/FAIL] |
 | Completeness | [PASS/FAIL] |

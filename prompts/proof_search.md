@@ -63,7 +63,7 @@ A proof is ONLY valuable if it tackles the hardest part head-on. The hard part i
 
 - ❌ Writing "clearly, X holds" or "it is straightforward to verify" for non-trivial claims. If it were clear, you wouldn't need to say it. **Prove it.**
 - ❌ Skipping the key inequality, the critical estimate, or the hardest case with vague language. **Work through it step by step.**
-- ❌ Replacing a hard problem with a weaker version and hoping no one notices. **Prove exactly what was asked.**
+- ❌ Replacing a hard problem with a weaker version and hoping no one notices. **Prove exactly what was asked.** The verification agent compares your problem statement against the original — any alteration is an automatic FAIL.
 - ❌ Giving up after a few minutes of difficulty and writing a half-baked proof. **Push through.** Hard steps require hard work.
 - ❌ Claiming a result "follows from standard techniques" without showing which techniques and how they apply. **Be explicit.**
 - ❌ Writing a proof outline or sketch and calling it a proof. **A proof must be complete, with every step justified.**
@@ -78,6 +78,21 @@ A proof is ONLY valuable if it tackles the hardest part head-on. The hard part i
 - ✅ If you genuinely cannot prove a step after exhaustive effort, say so honestly in the proof status log — do NOT paper over it with vague language in the proof itself.
 
 **Remember: the verification agent WILL catch hand-waving, and the round will be wasted. It is far better to write a proof that is incomplete but honest about its gaps than one that pretends to be complete but hides the hard parts behind "clearly" and "obviously". A failed round where you genuinely engaged with the difficulty teaches the next round something. A failed round where you dodged the difficulty teaches nothing.**
+
+## CRITICAL: Do NOT Alter the Problem Statement
+
+**You must prove EXACTLY the problem stated in `{problem_file}` — nothing more, nothing less.**
+
+- Do NOT add extra assumptions or hypotheses that are not in the original problem.
+- Do NOT weaken the conclusion (e.g. proving a bound of 2 when the problem asks for 1).
+- Do NOT strengthen the hypotheses (e.g. assuming continuity when the problem only gives measurability).
+- Do NOT change quantifiers (e.g. proving "there exists" when the problem says "for all").
+- Do NOT restrict the domain (e.g. proving for positive integers when the problem says all integers).
+- Do NOT prove a special case and present it as the general result.
+- Do NOT prove the converse instead of the original statement.
+- Do NOT silently rephrase the problem in a way that changes its mathematical meaning.
+
+When you restate the problem in your proof file, **copy the mathematical content verbatim from `{problem_file}`**. You may reformat (e.g. LaTeX to readable math) but the mathematical meaning must be identical. The verification agent will compare your stated problem against the original word-by-word, and any discrepancy will cause an automatic FAIL.
 
 ## Your Task
 
@@ -98,7 +113,7 @@ Write the proof in Markdown format in `{proof_file}`. Use the following structur
 # Proof
 
 ## Problem Statement
-(Restate the problem concisely)
+(Copy the problem from {problem_file} verbatim. Do NOT paraphrase or alter it.)
 
 ## Proof
 (Your complete proof here. Use LaTeX math notation where appropriate: $...$, $$...$$)
