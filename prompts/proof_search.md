@@ -45,6 +45,7 @@ This proof search runs in multiple rounds. This is round {round_num}.
 ### At the START of your round:
 {previous_round_instructions}
 - Use this information to pick up where the previous round left off and try **different** strategies.
+- **Search online for related work.** At the beginning of every round, use web search to look for related theorems, techniques, papers, or forum discussions (e.g., Math StackExchange, MathOverflow, ArXiv, Wikipedia) that may be relevant to the problem. Base your search queries on the previous round's status log — focus on the approaches that failed, the specific steps that were hard, and the techniques that were attempted. This way your searches are targeted rather than generic. Even if a literature survey was done earlier, new queries informed by what was actually tried (and what went wrong) may surface results the initial survey missed. Spend a few minutes on this before diving into proof writing.
 
 ### At the END of your round:
 - **You MUST save a complete proof status log** to `{proof_status_file}`.
@@ -73,6 +74,7 @@ A proof is ONLY valuable if it tackles the hardest part head-on. The hard part i
 
 - ✅ Identify the hardest step in the proof and spend MOST of your effort there.
 - ✅ When you hit a wall, try harder before trying something else. Sit with the difficulty. Break the hard step into sub-steps. Use computational tools to explore.
+- ✅ **When you are truly stuck and don't know what to do next, search online.** Use web search to look for the specific technique, lemma, or type of problem you are struggling with. Search Math StackExchange, MathOverflow, ArXiv, Wikipedia, or other mathematical resources. A targeted search like "bound for sum of divisors using convexity" or "induction on tree depth for graph coloring" can unlock an approach you hadn't considered. Do NOT spin your wheels in silence — actively seek external knowledge when you are blocked.
 - ✅ If a step is hard to prove, that means it NEEDS a careful proof — not a hand-wave.
 - ✅ Write out every epsilon, every bound, every case. Be painfully explicit.
 - ✅ If you genuinely cannot prove a step after exhaustive effort, say so honestly in the proof status log — do NOT paper over it with vague language in the proof itself.
