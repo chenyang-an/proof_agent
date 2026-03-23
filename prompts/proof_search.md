@@ -124,6 +124,17 @@ Write the proof in Markdown format in `{proof_file}`. Use the following structur
 (Brief summary of the main proof strategy and key insights)
 ```
 
+## CRITICAL: Save Progress Incrementally
+
+**Do NOT try to write the entire proof in one shot.** As soon as you have a meaningful skeleton, a partial argument, or substantial progress on a key step, **write it to `{proof_file}` immediately** — then keep working to fill in gaps and refine.
+
+Why this matters:
+- If you run out of context or hit an error late in a long attempt, all unsaved work is lost.
+- A partial proof with honest gaps marked (e.g., "TODO: show this bound holds") is far more useful to the next round than nothing at all.
+- Saving early also lets you re-read what you've written, which often reveals mistakes or better approaches.
+
+**Workflow: write early, write often.** Save a skeleton first, then iteratively strengthen it. Every time you complete a meaningful sub-argument, update the file. Your final save should be the polished version, but intermediate saves protect your progress.
+
 ## Workflow
 
 ### Step 1: Understand the Problem
