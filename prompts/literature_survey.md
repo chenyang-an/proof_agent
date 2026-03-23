@@ -23,6 +23,58 @@ Think of yourself as a senior mathematician briefing a colleague who is about to
 
 ---
 
+## Phase 0: Difficulty Evaluation
+
+**Before doing anything else**, read the problem and evaluate its difficulty. Write your evaluation to `{related_info_dir}/difficulty_evaluation.md`.
+
+### Classification
+
+Classify the problem into exactly one of these levels:
+
+| Level | Description | Examples |
+|-------|-------------|----------|
+| **Easy** | Textbook exercise or routine application of a known theorem. A strong undergraduate could solve it in one sitting. | Direct epsilon-delta proof, straightforward induction, applying a named theorem with all hypotheses clearly satisfied |
+| **Medium** | Non-trivial problem requiring clever technique selection or combining multiple ideas. Competition-level or tricky homework. | Competition problems, qualifying exam questions, problems needing a non-obvious substitution or trick |
+| **Hard** | Research-level, requires deep insight, novel combinations, or is adjacent to open problems. Even experts might need substantial time. | Research paper lemmas, problems with subtle hypotheses, problems requiring machinery from multiple subfields |
+
+### What to write in `{related_info_dir}/difficulty_evaluation.md`
+
+```
+# Difficulty Evaluation
+
+## Classification: [Easy / Medium / Hard]
+
+## Justification
+[2-4 sentences explaining why you chose this level. Reference specific features of the problem.]
+
+## Key Complexity Factors
+- [Factor 1]
+- [Factor 2]
+- ...
+```
+
+### How difficulty affects the survey
+
+After writing the evaluation, follow the branch that matches your classification:
+
+#### If Easy:
+Write **concise** versions of the three output files and then **stop**. Specifically:
+- `problem_analysis.md`: 1-2 paragraphs covering classification, key objects, and any edge cases. No need for exhaustive subsections.
+- `related_theorems.md`: State the 1-3 directly applicable theorems with their conditions. Skip "Closely Related Results", "Counterexamples to Watch For", etc.
+- `proof_strategies.md`: State the recommended approach in 1-2 paragraphs. Skip "Likely Dead Ends" and "Analogous Proofs" subsections.
+
+Then you are done. Do not execute Phases 1-3 below.
+
+#### If Medium:
+Execute Phases 1-3 below, but at **moderate depth**:
+- In Phase 2: Focus on "Directly Applicable Theorems" and "Useful Lemmas". Write "Closely Related Results" briefly. Skip "Counterexamples to Watch For" unless something important comes to mind.
+- In Phase 3: Focus on "Candidate Proof Techniques" and "Recommended Attack Plan". Skip "Likely Dead Ends" unless there's an obvious trap worth mentioning.
+
+#### If Hard:
+Execute the **full survey** as written in Phases 1-3 below. Hold nothing back — the proof agent will need every advantage.
+
+---
+
 ## Phase 1: Problem Analysis
 
 Analyze the problem and write to `{related_info_dir}/problem_analysis.md`:
@@ -100,13 +152,16 @@ Think about HOW to prove this and write to `{related_info_dir}/proof_strategies.
 
 ## Output Requirements
 
-Create the directory `{related_info_dir}/` if it does not exist, and write these three files:
+Create the directory `{related_info_dir}/` if it does not exist, and write these files:
 
 | File | Contents |
 |------|----------|
+| `{related_info_dir}/difficulty_evaluation.md` | Difficulty classification (Easy/Medium/Hard) with justification — **always written first** |
 | `{related_info_dir}/problem_analysis.md` | Problem classification, key objects, edge cases |
 | `{related_info_dir}/related_theorems.md` | Applicable theorems, related results, useful lemmas, counterexamples |
 | `{related_info_dir}/proof_strategies.md` | Candidate techniques, analogous proofs, dead ends, recommended plan |
+
+**Note:** The depth of the last three files depends on the difficulty classification from Phase 0. See the branching instructions above.
 
 ## Temporary Files
 

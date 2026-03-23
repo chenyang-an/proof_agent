@@ -139,7 +139,12 @@ def detect_resume_state(output_dir: str) -> tuple[bool, int, bool]:
     """
     # --- Check literature survey completeness ---
     related_info_dir = os.path.join(output_dir, "related_info")
-    survey_files = ["problem_analysis.md", "related_theorems.md", "proof_strategies.md"]
+    survey_files = [
+        "difficulty_evaluation.md",
+        "problem_analysis.md",
+        "related_theorems.md",
+        "proof_strategies.md",
+    ]
     skip_survey = all(
         _file_nonempty(os.path.join(related_info_dir, f)) for f in survey_files
     )

@@ -6,7 +6,7 @@ A multi-agent pipeline that takes a mathematical problem statement in LaTeX and 
 
 The pipeline runs in three stages:
 
-**Stage 0 — Literature Survey.** A survey agent reads the problem and conducts a deep investigation of the mathematical landscape: classifying the problem, identifying applicable theorems, cataloguing proof techniques, and flagging likely dead ends. The results are saved to `related_info/` for the proof agent to reference.
+**Stage 0 — Literature Survey.** A survey agent reads the problem and first evaluates its difficulty (Easy / Medium / Hard), then conducts an investigation of the mathematical landscape scaled to that difficulty: classifying the problem, identifying applicable theorems, cataloguing proof techniques, and flagging likely dead ends. Easy problems get a brief survey; hard problems get the full treatment. The results are saved to `related_info/` for the proof agent to reference.
 
 **Stage 1 — Proof Search Loop.** An iterative loop of three agents runs up to `max_proof_iterations` rounds (default 9):
 
@@ -72,6 +72,7 @@ Given an output directory `<output>/`, a complete run produces:
 ├── token_usage.json                   # Machine-readable token usage data
 │
 ├── related_info/                      # Stage 0: literature survey output
+│   ├── difficulty_evaluation.md       #   Difficulty classification (Easy/Medium/Hard) with justification
 │   ├── problem_analysis.md            #   Problem classification, key objects, edge cases
 │   ├── related_theorems.md            #   Applicable theorems, lemmas, counterexamples
 │   └── proof_strategies.md            #   Candidate techniques, analogous proofs, dead ends
@@ -328,7 +329,7 @@ This pipeline runs Claude CLI with `permission_mode: "bypassPermissions"` (confi
                  |  Agent                  |
                  +------------------------+
                               |
-                    related_info/ (3 files)
+                    related_info/ (4 files)
                               |
           +-------------------+-------------------+
           |                                       |
