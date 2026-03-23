@@ -46,6 +46,7 @@ This proof search runs in multiple rounds. This is round {round_num}.
 {previous_round_instructions}
 - Use this information to pick up where the previous round left off and try **different** strategies.
 - **Search online for related work.** At the beginning of every round, use web search to look for related theorems, techniques, papers, or forum discussions (e.g., Math StackExchange, MathOverflow, ArXiv, Wikipedia) that may be relevant to the problem. Base your search queries on the previous round's status log — focus on the approaches that failed, the specific steps that were hard, and the techniques that were attempted. This way your searches are targeted rather than generic. Even if a literature survey was done earlier, new queries informed by what was actually tried (and what went wrong) may surface results the initial survey missed. Spend a few minutes on this before diving into proof writing.
+- **Check for human guidance.** Read any files in `/home/cyanz/lean/proof_agent/human_help/` if the directory exists and is non-empty. A human may have left hints, suggestions, corrections, or opinions about the problem or about previous proof attempts. This input can be extremely valuable — a single human observation can unlock an approach you hadn't considered or point out a subtle error in your reasoning. Treat human guidance seriously, but still verify any claims independently.
 
 ### At the END of your round:
 - **You MUST save a complete proof status log** to `{proof_status_file}`.
@@ -80,6 +81,8 @@ A proof is ONLY valuable if it tackles the hardest part head-on. The hard part i
 - ✅ If you genuinely cannot prove a step after exhaustive effort, say so honestly in the proof status log — do NOT paper over it with vague language in the proof itself.
 
 **Remember: the verification agent WILL catch hand-waving, and the round will be wasted. It is far better to write a proof that is incomplete but honest about its gaps than one that pretends to be complete but hides the hard parts behind "clearly" and "obviously". A failed round where you genuinely engaged with the difficulty teaches the next round something. A failed round where you dodged the difficulty teaches nothing.**
+
+**⚠️ Your proof will be decomposed and checked at every level of detail.** After you write your proof, a separate decomposition agent will break it into its smallest atomic claims (miniclaims) — every single equality, inequality, implication, case, and algebraic step becomes its own numbered item. Then a verification agent will check each miniclaim independently using both logical analysis and computational tools (SymPy, Z3, numerical tests). It will also verify that groups of miniclaims actually prove the intermediate results they claim to, and that those intermediate results compose correctly to prove the final conclusion. There is nowhere to hide: every "clearly", every "it follows that", every implicit step will be surfaced and individually scrutinized. If you hand-wave even one step, it will be isolated, flagged, and the entire round will fail. Write every step as if it will be read in isolation and challenged — because it will be.
 
 ## CRITICAL: Do NOT Alter the Problem Statement
 

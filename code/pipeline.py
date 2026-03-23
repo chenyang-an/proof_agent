@@ -5,9 +5,10 @@ Proof Agent pipeline: takes a problem.tex (LaTeX) and produces a natural-languag
 Three-stage pipeline:
   Stage 0 — Literature Survey agent: deep-dives into the problem context and related results
   Stage 1 — Proof Search Loop (iterative, up to max_proof_iterations rounds):
-    1a. Proof Search agent  — writes/refines the proof (informed by the survey)
-    1b. Verification agent  — checks the proof for correctness
-    1c. Verdict agent       — decides DONE or CONTINUE
+    1a. Proof Search agent    — writes/refines the proof (informed by the survey)
+    1b. Decomposition agent   — decomposes the proof into miniclaims/miniproofs
+    1c. Verification agent    — checks each miniclaim and the full proof for correctness
+    1d. Verdict agent         — decides DONE or CONTINUE
   Stage 2 — Summary agent: reads all generated files and writes proof_effort_summary.md
 
 Supports resuming interrupted runs: detects prior progress on disk, skips
@@ -123,15 +124,17 @@ def _parse_verdict_from_file(path: str) -> str:
     return "UNKNOWN"
 
 
-def detect_resume_state(output_dir: str) -> tuple[bool, int, bool]:
+def detect_resume_state(output_dir: str) -> tuple[bool, int, str]:
     """Scan the output directory for progress from a previous run.
 
-    Returns (skip_survey, start_round, resume_from_verification):
+    Returns (skip_survey, start_round, resume_from_step):
       - skip_survey: True if the literature survey is already complete.
       - start_round: the round number to start (or resume) the proof loop from.
         1 means no prior rounds exist.
-      - resume_from_verification: True if the proof search step already
-        completed for start_round and we should skip straight to verification.
+      - resume_from_step: which step to resume from within start_round:
+          "proof_search"   — start the round from scratch
+          "decomposition"  — proof search done, resume from decomposition
+          "verification"   — proof search + decomposition done, resume from verification
 
     Side effects:
       - Deletes the last round directory if proof search did NOT complete
@@ -152,7 +155,7 @@ def detect_resume_state(output_dir: str) -> tuple[bool, int, bool]:
     # --- Scan round directories ---
     verify_dir = os.path.join(output_dir, "verification")
     if not os.path.isdir(verify_dir):
-        return skip_survey, 1, False
+        return skip_survey, 1, "proof_search"
 
     # Collect round numbers that have a directory
     round_nums: list[int] = []
@@ -163,25 +166,29 @@ def detect_resume_state(output_dir: str) -> tuple[bool, int, bool]:
             except ValueError:
                 continue
     if not round_nums:
-        return skip_survey, 1, False
+        return skip_survey, 1, "proof_search"
 
     round_nums.sort()
     last = round_nums[-1]
     last_dir = os.path.join(verify_dir, f"round_{last}")
 
     status_ok = _file_nonempty(os.path.join(last_dir, "proof_status.md"))
+    decomp_ok = _file_nonempty(os.path.join(last_dir, "proof_decomposition.md"))
     verify_ok = _file_nonempty(os.path.join(last_dir, "verification_result.md"))
 
-    if status_ok and verify_ok:
+    if status_ok and decomp_ok and verify_ok:
         # Last round is fully complete — resume from the next one.
-        return skip_survey, last + 1, False
+        return skip_survey, last + 1, "proof_search"
 
-    if status_ok and not verify_ok:
-        # Proof search completed but verification didn't — resume this
-        # round from the verification step.  proof.md already contains
-        # the proof search agent's output, so don't touch it.
-        print(f"  Round {last}: proof search complete, verification incomplete — will resume from verification")
-        return skip_survey, last, True
+    if status_ok and decomp_ok and not verify_ok:
+        # Proof search + decomposition completed but verification didn't.
+        print(f"  Round {last}: decomposition complete, verification incomplete — will resume from verification")
+        return skip_survey, last, "verification"
+
+    if status_ok and not decomp_ok:
+        # Proof search completed but decomposition didn't.
+        print(f"  Round {last}: proof search complete, decomposition incomplete — will resume from decomposition")
+        return skip_survey, last, "decomposition"
 
     # Proof search didn't complete — delete the round and restore proof.md.
     proof_file = os.path.join(output_dir, "proof.md")
@@ -194,7 +201,7 @@ def detect_resume_state(output_dir: str) -> tuple[bool, int, bool]:
     print(f"  Deleted incomplete round_{last}")
 
     # Redo this round from scratch.
-    return skip_survey, last, False
+    return skip_survey, last, "proof_search"
 
 
 # ---------------------------------------------------------------------------
@@ -547,16 +554,17 @@ async def run_proof_loop(
     proving_skill: str = "",
     tracker: TokenTracker | None = None,
     start_round: int = 1,
-    resume_from_verification: bool = False,
+    resume_from_step: str = "proof_search",
 ) -> bool:
-    """Run the proof search/verification/verdict loop.
+    """Run the proof search/decomposition/verification/verdict loop.
 
     Args:
         start_round: Round number to begin from (for resume support).
             Rounds before this are assumed already complete on disk.
-        resume_from_verification: If True, skip the proof search step for
-            start_round and jump straight to verification (the proof search
-            agent already completed for that round).
+        resume_from_step: Which step to resume from within start_round:
+            "proof_search"  — start the round from scratch
+            "decomposition" — skip proof search, start from decomposition
+            "verification"  — skip proof search + decomposition, start from verification
 
     Returns True if successful (DONE), False if max iterations reached.
     """
@@ -571,7 +579,7 @@ async def run_proof_loop(
             f.write("<!-- Proof will be written here by the proof search agent -->\n")
 
     # --- Resume check: parse the last complete round's verdict from disk ---
-    if start_round > 1 and not resume_from_verification:
+    if start_round > 1 and resume_from_step == "proof_search":
         prev_complete = start_round - 1
         prev_verify_file = os.path.join(
             verify_dir, f"round_{prev_complete}", "verification_result.md",
@@ -590,6 +598,7 @@ async def run_proof_loop(
         round_dir = os.path.join(verify_dir, f"round_{i}")
         os.makedirs(round_dir, exist_ok=True)
         proof_status_file = os.path.join(round_dir, "proof_status.md")
+        decomp_file = os.path.join(round_dir, "proof_decomposition.md")
         verify_result_file = os.path.join(round_dir, "verification_result.md")
 
         prev_verify = os.path.join(verify_dir, f"round_{i-1}", "verification_result.md")
@@ -600,9 +609,13 @@ async def run_proof_loop(
         logger.log(f"========================================")
         logger.append_history(f"Iteration {i} started (round dir: round_{i})")
 
-        # Check if we should skip proof search for this round (resume case)
-        skip_proof_search = (i == start_round and resume_from_verification)
+        # Determine which steps to skip for this round (resume case)
+        skip_proof_search = (i == start_round and resume_from_step in ("decomposition", "verification"))
+        skip_decomposition = (i == start_round and resume_from_step == "verification")
 
+        # ------------------------------------------------------------------
+        # Step 1/4: Proof Search
+        # ------------------------------------------------------------------
         if skip_proof_search:
             logger.log(f"--- Resuming round {i}: skipping proof search (already complete) ---")
             logger.append_history(f"Iteration {i}: Proof search SKIPPED (resume)")
@@ -621,8 +634,7 @@ async def run_proof_loop(
             if os.path.exists(proof_file):
                 shutil.copy2(proof_file, proof_backup)
 
-            # Step 1: Proof search
-            logger.update_status(i, max_iterations, "1/3 Proof Search", "RUNNING", "Running proof search agent...")
+            logger.update_status(i, max_iterations, "1/4 Proof Search", "RUNNING", "Running proof search agent...")
             logger.append_history(f"Iteration {i}: Proof search started")
 
             search_prompt = load_prompt(
@@ -641,14 +653,40 @@ async def run_proof_loop(
                             tracker=tracker, call_name=f"Proof Search R{i}")
             logger.append_history(f"Iteration {i}: Proof search completed")
 
-        # Step 2: Verification
-        logger.update_status(i, max_iterations, "2/3 Verification", "RUNNING", "Running verification agent...")
+        # ------------------------------------------------------------------
+        # Step 2/4: Proof Decomposition
+        # ------------------------------------------------------------------
+        if skip_decomposition:
+            logger.log(f"--- Resuming round {i}: skipping decomposition (already complete) ---")
+            logger.append_history(f"Iteration {i}: Decomposition SKIPPED (resume)")
+        else:
+            logger.update_status(i, max_iterations, "2/4 Decomposition", "RUNNING", "Running decomposition agent...")
+            logger.append_history(f"Iteration {i}: Decomposition started")
+
+            decomp_prompt = load_prompt(
+                prompts_dir, "proof_decompose.md",
+                problem_file=problem_file,
+                proof_file=proof_file,
+                output_file=decomp_file,
+                output_dir=output_dir,
+            )
+            decomp_prompt += f"\n\nThis is round {i}. Write decomposition to {decomp_file}."
+
+            await run_agent(claude_opts, decomp_prompt, logger,
+                            tracker=tracker, call_name=f"Decomposition R{i}")
+            logger.append_history(f"Iteration {i}: Decomposition completed")
+
+        # ------------------------------------------------------------------
+        # Step 3/4: Verification
+        # ------------------------------------------------------------------
+        logger.update_status(i, max_iterations, "3/4 Verification", "RUNNING", "Running verification agent...")
         logger.append_history(f"Iteration {i}: Verification started")
 
         verify_prompt = load_prompt(
             prompts_dir, "proof_verify.md",
             problem_file=problem_file,
             proof_file=proof_file,
+            decomposition_file=decomp_file,
             output_file=verify_result_file,
             output_dir=output_dir,
         )
@@ -658,8 +696,10 @@ async def run_proof_loop(
                         tracker=tracker, call_name=f"Verification R{i}")
         logger.append_history(f"Iteration {i}: Verification completed")
 
-        # Step 3: Verdict
-        logger.update_status(i, max_iterations, "3/3 Checking Verdict", "RUNNING", "Analyzing verification results...")
+        # ------------------------------------------------------------------
+        # Step 4/4: Verdict
+        # ------------------------------------------------------------------
+        logger.update_status(i, max_iterations, "4/4 Checking Verdict", "RUNNING", "Analyzing verification results...")
         logger.append_history(f"Iteration {i}: Checking verdict")
 
         verdict_prompt = load_prompt(
@@ -740,7 +780,7 @@ async def main():
     # -------------------------------------------------------
     # Detect resume state
     # -------------------------------------------------------
-    skip_survey, start_round, resume_from_verification = detect_resume_state(output_dir)
+    skip_survey, start_round, resume_from_step = detect_resume_state(output_dir)
 
     print("=" * 60)
     print("  Proof Agent Pipeline")
@@ -749,12 +789,14 @@ async def main():
     print(f"  Output:     {output_dir}")
     print(f"  Max rounds: {max_proof}")
     print(f"  Token log:  {tracker.md_path}")
-    if skip_survey or start_round > 1 or resume_from_verification:
+    if skip_survey or start_round > 1 or resume_from_step != "proof_search":
         print()
         print("  RESUMING previous run:")
         if skip_survey:
             print("    - Literature survey: SKIP (already complete)")
-        if resume_from_verification:
+        if resume_from_step == "decomposition":
+            print(f"    - Proof loop: resuming round {start_round} from decomposition step")
+        elif resume_from_step == "verification":
             print(f"    - Proof loop: resuming round {start_round} from verification step")
         elif start_round > 1:
             print(f"    - Proof loop: resuming from round {start_round}")
@@ -784,7 +826,9 @@ async def main():
     # -------------------------------------------------------
     print()
     print("=" * 60)
-    if resume_from_verification:
+    if resume_from_step == "decomposition":
+        print(f"STAGE 1: Proof Search  [RESUMING round {start_round} from decomposition]")
+    elif resume_from_step == "verification":
         print(f"STAGE 1: Proof Search  [RESUMING round {start_round} from verification]")
     elif start_round > 1:
         print(f"STAGE 1: Proof Search  [RESUMING from round {start_round}]")
@@ -796,7 +840,7 @@ async def main():
         max_proof, related_info_dir=related_info_dir,
         proving_skill=proving_skill, tracker=tracker,
         start_round=start_round,
-        resume_from_verification=resume_from_verification,
+        resume_from_step=resume_from_step,
     )
 
     # -------------------------------------------------------
