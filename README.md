@@ -1,6 +1,6 @@
-# Proof Agent
+# QED
 
-A multi-agent pipeline that takes a mathematical problem statement in LaTeX and produces a rigorous natural-language proof. The pipeline uses Claude as the underlying LLM, orchestrated through the [Agent Framework](https://github.com/microsoft/agent-framework). For hard problems, it optionally runs Claude, Codex (GPT-5.4), and Gemini in parallel to maximize the chance of finding a correct proof. It performs stronger than chatbot versions of various models on math proving tasks, since it uses agentic loops to search, decompose, and verify math proofs instead of answering in one shot.
+QED is a multi-agent pipeline that takes a mathematical problem statement in LaTeX and produces a rigorous natural-language proof. The pipeline uses Claude as the underlying LLM, orchestrated through the [Agent Framework](https://github.com/microsoft/agent-framework). For hard problems, it optionally runs Claude, Codex (GPT-5.4), and Gemini in parallel to maximize the chance of finding a correct proof. It performs stronger than chatbot versions of various models on math proving tasks, since it uses agentic loops to search, decompose, and verify math proofs instead of answering in one shot.
 
 ## How It Works
 

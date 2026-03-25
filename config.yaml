@@ -6,7 +6,7 @@ pipeline:
   #   with a selector agent picking the best proof. (3x cost per round)
   # When disabled: hard problems use Claude only (same as easy/medium). No selector needed.
   multi_model:
-    enabled: true              # set to false to use Claude-only for all difficulties
+    enabled: false              # set to false to use Claude-only for all difficulties
     difficulty_threshold: "hard"  # "hard" or "medium" — problems at or above this trigger multi-model
 
 claude:
@@ -14,7 +14,7 @@ claude:
   permission_mode: "bypassPermissions"
 
   # Choose ONE provider: "subscription", "bedrock", or "api_key"
-  provider: "api_key"
+  provider: "bedrock"
 
   # --- Option 1: Claude subscription (Pro/Max) ---
   # No API key needed. Model is a shorthand: "opus", "sonnet", "haiku"

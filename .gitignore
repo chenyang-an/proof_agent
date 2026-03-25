@@ -3,3 +3,5 @@ test_call.py
 
 __pycache__/
 *.pyc
+
+config.yaml
