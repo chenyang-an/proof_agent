@@ -4,7 +4,7 @@ QED is a multi-agent pipeline that takes a mathematical problem statement in LaT
 
 ## Math Research Problems that are solved by QED, verified by domain experts.
 
-1. Search a smooth space–time weight function (with auxiliary parameters) for the wave operator on a half-infinite domain such that it satisfies global pseudoconvexity, growth, and positivity conditions required to validate a Carleman estimate, and characterize the admissible parameter regime ensuring these conditions hold with proofs. (GitHub link will be released soon after paper arxived) (The proof produced by QED has been validated by domain experts)
+1. Search a smooth space–time weight function (with auxiliary parameters) for the wave operator on a half-infinite domain such that it satisfies global pseudoconvexity, growth, and positivity conditions required to validate a Carleman estimate, and characterize the admissible parameter regime ensuring these conditions hold with proofs. (GitHub link will be released soon after paper arxived).
 
 ## How It Works
 
