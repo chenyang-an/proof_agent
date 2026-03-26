@@ -2,7 +2,7 @@
 
 QED is a multi-agent pipeline that takes a mathematical problem statement in LaTeX and produces a rigorous natural-language proof. The pipeline uses Claude as the underlying LLM, orchestrated through the [Agent Framework](https://github.com/microsoft/agent-framework). For hard problems, it optionally runs Claude, Codex (GPT-5.4), and Gemini in parallel to maximize the chance of finding a correct proof. It performs stronger than chatbot versions of various models on math proving tasks, since it uses agentic loops to search, decompose, and verify math proofs instead of answering in one shot.
 
-## Math Research Problems that are solved by QED:
+## Math Research Problems that are solved by QED, verified by domain experts.
 
 1. Search a smooth space–time weight function (with auxiliary parameters) for the wave operator on a half-infinite domain such that it satisfies global pseudoconvexity, growth, and positivity conditions required to validate a Carleman estimate, and characterize the admissible parameter regime ensuring these conditions hold with proofs. (GitHub link will be released soon after paper arxived) (The proof produced by QED has been validated by domain experts)
 
