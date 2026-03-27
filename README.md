@@ -4,7 +4,7 @@
 
 **Contributor:** Qihao Ye (<q8ye@ucsd.edu>)
 
-QED is a multi-agent pipeline that takes a mathematical problem statement in LaTeX and produces a rigorous natural-language proof. The pipeline uses Claude as the underlying LLM, orchestrated through the [Agent Framework](https://github.com/microsoft/agent-framework). For hard problems, it optionally runs Claude, Codex (GPT-5.4), and Gemini in parallel to maximize the chance of finding a correct proof. It performs stronger than chatbot versions of various models on math proving tasks, since it uses agentic loops to search, decompose, and verify math proofs instead of answering in one shot.
+QED is a multi-agent pipeline that takes a mathematical problem statement in LaTeX and produces a rigorous natural-language proof. The pipeline orchestrates Claude (and optionally Codex and Gemini) through their respective CLIs via bash subprocesses — no agent framework is used. For hard problems, it optionally runs Claude, Codex (GPT-5.4), and Gemini in parallel to maximize the chance of finding a correct proof. It performs stronger than chatbot versions of various models on math proving tasks, since it uses agentic loops to search, decompose, and verify math proofs instead of answering in one shot.
 
 ## Math Research Problems that are solved by QED, verified by domain experts.
 
@@ -18,11 +18,11 @@ QED is a multi-agent pipeline that takes a mathematical problem statement in LaT
 
 ## How It Works
 
-The pipeline runs in three stages:
+The pipeline runs in three stages. All model invocations are done by spawning CLI subprocesses (`claude -p`, `codex exec`, `gemini -p`) — the pipeline reads their JSON stdout for token tracking and passes prompts as command-line arguments.
 
 **Stage 0 — Literature Survey.** A survey agent reads the problem and first evaluates its difficulty (Easy / Medium / Hard), then conducts an investigation of the mathematical landscape scaled to that difficulty: classifying the problem, identifying applicable theorems, and cataloguing related results. Easy problems get a brief survey; hard problems get the full treatment. The results are saved to `related_info/` for the proof agent to reference. The survey agent does NOT produce proof strategies — that is the proof search agent's job.
 
-**Stage 1 — Proof Search Loop.** An iterative loop runs up to `max_proof_iterations` rounds (default 9). The behavior adapts to the problem's difficulty:
+**Stage 1 — Proof Search Loop.** An iterative loop runs up to `max_proof_iterations` rounds (default 9). The behavior adapts to the problem's difficulty and the `skip_decomposition` config setting:
 
 **Hard problems with multi-model enabled — 6 steps per round (parallel):**
 
@@ -33,12 +33,26 @@ The pipeline runs in three stages:
 5. **Apply Selection** — The winning proof is copied to the main `proof.md`.
 6. **Verdict Agent** — Reads ONLY the selected model's verification report and returns `DONE` or `CONTINUE`.
 
+**Hard problems with multi-model enabled + `skip_decomposition: true` — 5 steps per round (parallel):**
+
+1. **Proof Search (parallel)** — Same as above.
+2. **Verification (parallel, direct)** — Claude verifies all proofs directly using `proof_verify_direct.md` — the verifier identifies logical steps inline and checks each one. No separate decomposition step.
+3. **Selector Agent** — Same as above.
+4. **Apply Selection** — Same as above.
+5. **Verdict Agent** — Same as above.
+
 **Medium / Hard (single-model) problems — 4 steps per round:**
 
 1. **Proof Search Agent** — Reads the problem, the literature survey, any previous-round feedback, and any human guidance from `human_help/`. Writes or refines a complete natural-language proof in `proof.md`.
 2. **Decomposition Agent** — Decomposes the proof into numbered miniclaims, each with a verbatim miniproof quote, dependency list, and type classification. Also produces a Proof Architecture. Writes `proof_decomposition.md`.
 3. **Verification Agent** — Verifies each miniclaim individually (logical validity, mathematical correctness, computational checks via SymPy/Z3/NumPy). Then verifies hierarchical composition and runs global checks. Writes `verification_result.md`.
 4. **Verdict Agent** — Reads the verification result and returns `DONE` or `CONTINUE`.
+
+**Medium / Hard (single-model) + `skip_decomposition: true` — 3 steps per round:**
+
+1. **Proof Search Agent** — Same as above.
+2. **Verification Agent (direct)** — Skips decomposition. The verifier identifies the proof's logical steps inline, checks each one individually (logical validity, mathematical correctness, computational checks via SymPy/Z3/NumPy), then runs structural completeness and global checks. Uses `proof_verify_direct.md`. Writes `verification_result.md`.
+3. **Verdict Agent** — Same as above.
 
 **Easy problems — 3 steps per round:**
 
@@ -54,7 +68,7 @@ All agents receive `skill/super_math_skill.md` as a system-level instruction —
 
 **Human guidance.** You can drop hints, suggestions, or corrections into `human_help/` at any time during a run. The proof search agent checks this directory at the start of every round.
 
-**Resume support.** If the pipeline is interrupted and re-run with the same output directory, it automatically detects prior progress: skips the literature survey if complete, detects which step within a round was last completed (including parallel steps), cleans up incomplete state, restores `proof.md` from backup if needed, and resumes from exactly where it left off.
+**Resume support.** If the pipeline is interrupted and re-run with the same output directory, it automatically detects prior progress: skips the literature survey if complete, detects which step within a round was last completed (including parallel steps), cleans up incomplete state, restores `proof.md` from backup if needed, and resumes from exactly where it left off. Resume detection respects the `skip_decomposition` setting — when enabled, it correctly interprets the absence of decomposition files.
 
 **Smoke test.** `run.sh` automatically runs the smoke test before the pipeline starts. The smoke test validates prompts, skills, Claude connectivity, and — when multi-model is enabled — Codex and Gemini connectivity. If any test fails, the pipeline does not start.
 
@@ -71,16 +85,17 @@ proof_agent/
 │
 ├── code/
 │   ├── pipeline.py                    # Main orchestrator (all stages, logging, token tracking)
-│   ├── model_runner.py                # Unified async wrappers for Claude, Codex, Gemini
+│   ├── model_runner.py                # Unified async wrappers for Claude, Codex, Gemini CLIs
 │   └── smoke_test.py                  # Validation (prompts, skills, connectivity for all enabled models)
 │
 ├── prompts/
 │   ├── literature_survey.md           # Stage 0: literature survey agent prompt
 │   ├── proof_search.md               # Stage 1: proof search agent prompt
-│   ├── proof_decompose.md            # Stage 1: decomposition agent prompt (medium/hard)
-│   ├── proof_verify.md               # Stage 1: full verification agent prompt (medium/hard)
+│   ├── proof_decompose.md            # Stage 1: decomposition agent prompt (medium/hard, normal mode)
+│   ├── proof_verify.md               # Stage 1: full verification prompt (requires decomposition)
+│   ├── proof_verify_direct.md        # Stage 1: direct verification prompt (skip_decomposition mode)
 │   ├── proof_verify_easy.md          # Stage 1: lightweight verification prompt (easy)
-│   ├── proof_select.md              # Stage 1: selector agent prompt (multi-model hard only)
+│   ├── proof_select.md              # Stage 1: selector agent prompt (multi-model only)
 │   ├── verdict_proof.md              # Stage 1: verdict agent prompt
 │   └── proof_effort_summary.md       # Stage 2: proof effort summary agent prompt
 │
@@ -104,6 +119,7 @@ Each prompt file in `prompts/` is a Markdown template with `{placeholder}` varia
 | `proof_search.md` | `problem_file`, `proof_file`, `output_dir`, `related_info_dir`, `round_num`, `proof_status_file`, `previous_round_instructions`, `human_help_dir` |
 | `proof_decompose.md` | `problem_file`, `proof_file`, `output_file`, `output_dir` |
 | `proof_verify.md` | `problem_file`, `proof_file`, `decomposition_file`, `output_file`, `output_dir` |
+| `proof_verify_direct.md` | `problem_file`, `proof_file`, `output_file`, `output_dir` |
 | `proof_verify_easy.md` | `problem_file`, `proof_file`, `output_file`, `output_dir` |
 | `proof_select.md` | `problem_file`, `verify_claude`, `verify_codex`, `verify_gemini`, `proof_claude`, `proof_codex`, `proof_gemini`, `selection_file` |
 | `verdict_proof.md` | `verification_result_file` |
@@ -140,7 +156,7 @@ Given an output directory `<output>/`, a complete run produces:
 │   ├── round_1/
 │   │   ├── proof_before_round.md      #   Backup of proof.md before this round
 │   │   ├── proof_status.md            #   Proof search agent's log of what it tried
-│   │   ├── proof_decomposition.md     #   Miniclaim breakdown (medium/hard only)
+│   │   ├── proof_decomposition.md     #   Miniclaim breakdown (normal mode only, absent when skip_decomposition)
 │   │   └── verification_result.md     #   Verification verdict
 │   └── round_2/ ...
 │
@@ -163,17 +179,17 @@ verification/
     claude/
       proof.md                         # Claude's proof attempt
       proof_status.md                  # Claude's approach log
-      proof_decomposition.md           # Decomposition of Claude's proof
+      proof_decomposition.md           # Decomposition (absent when skip_decomposition)
       verification_result.md           # Verification of Claude's proof
     codex/
       proof.md                         # Codex's proof attempt
       proof_status.md
-      proof_decomposition.md
+      proof_decomposition.md           # Absent when skip_decomposition
       verification_result.md
     gemini/
       proof.md                         # Gemini's proof attempt
       proof_status.md
-      proof_decomposition.md
+      proof_decomposition.md           # Absent when skip_decomposition
       verification_result.md
     selection.md                       # Selector agent's pick + reasoning
 ```
@@ -209,7 +225,7 @@ Log directories: `literature_survey_log/`, `verification/`, `summary_log/`.
 | Dependency | Purpose | Install |
 |------------|---------|---------|
 | Python 3.11+ | Pipeline runtime | `conda create -n agent python=3.11` |
-| [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) | Agent execution backend | `npm install -g @anthropic-ai/claude-code` |
+| [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) | LLM execution backend | `npm install -g @anthropic-ai/claude-code` |
 | Codex CLI (optional) | Multi-model proof search | `npm install -g @openai/codex` |
 | Gemini CLI (optional) | Multi-model proof search | `npm install -g @anthropic-ai/gemini` |
 
@@ -220,9 +236,16 @@ Codex and Gemini CLIs are only required when `multi_model.enabled: true` in `con
 | Package | Purpose | Install |
 |---------|---------|---------|
 | `pyyaml` | Config file parsing | `pip install pyyaml` |
-| `agent-framework` | ClaudeAgent orchestration | `pip install agent-framework --pre` |
 
-The `agent_framework` package is from the [Microsoft Agent Framework](https://github.com/microsoft/agent-framework). It provides the `ClaudeAgent` class used to orchestrate all agent calls (`from agent_framework.anthropic import ClaudeAgent`).
+### How Models are Called
+
+The pipeline does **not** use any agent framework library. All model calls are done via bash subprocesses:
+
+- **Claude:** `claude -p --output-format json --dangerously-skip-permissions --model <model> <prompt>` — JSON stdout is parsed for the response text and token usage.
+- **Codex:** `codex --search -m <model> exec --json --dangerously-bypass-approvals-and-sandbox -C <dir> <prompt>` — JSONL stdout is parsed for events.
+- **Gemini:** `gemini -m <model> -y -o json -p <prompt>` — JSON stdout is parsed for the response and token stats.
+
+Each call is wrapped in `asyncio.run_in_executor` so the main event loop stays non-blocking during long-running agent calls. Stderr from each CLI flows directly to the terminal for real-time progress visibility.
 
 ### Claude Provider Setup
 
@@ -302,11 +325,11 @@ conda activate agent
 
 # 5. Install Python dependencies
 pip install pyyaml
-pip install agent-framework --pre
 
 # 6. Configure config.yaml
 #    - Set Claude provider (subscription/bedrock/api_key)
 #    - Set multi_model.enabled to true/false
+#    - Set skip_decomposition to true/false
 #    - Configure codex/gemini sections if using multi-model
 #    - Set gemini.api_key if using Gemini (get key from Google AI Studio)
 
@@ -378,7 +401,7 @@ It checks:
 2. All skill files exist
 3. Prompt templates render without unresolved placeholders
 4. Skill file loads correctly
-5. ClaudeAgent can connect and respond
+5. Claude CLI can connect and respond
 6. Config file has required fields
 7. Selector prompt (`proof_select.md`) renders correctly
 8. **When `multi_model.enabled: true`:** Codex and Gemini CLIs are installed and respond correctly. If either is missing or broken, the test **fails** — fix them or set `multi_model.enabled: false`.
@@ -423,6 +446,10 @@ cat <output>/verification/round_1/selection.md
 ```yaml
 pipeline:
   max_proof_iterations: 9       # Max rounds before stopping. Default: 9.
+  skip_decomposition: false     # true: skip decomposition step for medium/hard problems,
+                                #   use direct verification (proof_verify_direct.md).
+                                #   Easy problems are unaffected.
+                                # false: normal mode with decomposition → verification.
 
   multi_model:
     enabled: true               # true: hard problems use Claude+Codex+Gemini in parallel
@@ -456,7 +483,7 @@ gemini:
 
 ## Security Warning
 
-This pipeline runs Claude CLI with `permission_mode: "bypassPermissions"`. This means the agent can read, write, and execute files **without confirmation**. When multi-model is enabled, Codex and Gemini also run with sandbox bypassed.
+This pipeline runs Claude CLI with `--dangerously-skip-permissions`. This means the agent can read, write, and execute files **without confirmation**. When multi-model is enabled, Codex and Gemini also run with sandbox bypassed.
 
 **Recommendations:**
 - Review the prompts in `prompts/` before running.
@@ -472,7 +499,7 @@ This pipeline runs Claude CLI with `permission_mode: "bypassPermissions"`. This 
                                v
                   +------------------------+
                   |  Literature Survey      |   Stage 0
-                  |  Agent (Claude)         |   (classifies difficulty,
+                  |  Agent (Claude CLI)     |   (classifies difficulty,
                   +------------------------+    surveys related work)
                                |
                      related_info/ (3 files)
@@ -481,40 +508,44 @@ This pipeline runs Claude CLI with `permission_mode: "bypassPermissions"`. This 
                                |
            +-------------------+-------------------+
            |                   |                   |
-         Easy               Medium            Hard + multi_model
+         Easy            Medium / Hard         Hard + multi_model
            |                   |                   |
            v                   v                   v
-    [3-step round]     [4-step round]      [6-step parallel round]
-                                                   |
-                                          +--------+--------+
-                                          |        |        |
-                                        Claude   Codex   Gemini
-                                          |        |        |
-                                          v        v        v
-                                       3 proofs (parallel)
-                                          |        |        |
-                                       3 decompositions (Claude, parallel)
-                                          |        |        |
-                                       3 verifications (Claude, parallel)
-                                          |
-                                          v
-                                    Selector Agent
-                                    (picks best proof)
-                                          |
-                                          v
-                                    Verdict Agent
-                                    (DONE / CONTINUE)
-                                          |
-                               +----------+----------+
-                               |                     |
-                             DONE               CONTINUE
-                               |                     |
-                               v                     v
-                         +----------+          next round
-                         | Summary  |
-                         | Agent    |   Stage 2
-                         +----------+
+    [3-step round]     [3 or 4-step round]   [5 or 6-step parallel round]
+                        depends on              depends on
+                     skip_decomposition       skip_decomposition
+                               |                   |
+                               |          +--------+--------+
+                               |          |        |        |
+                               |        Claude   Codex   Gemini
+                               |          |        |        |
+                               |          v        v        v
+                               |       3 proofs (parallel)
+                               |          |
+                               |     [if skip_decomposition: skip]
+                               |          |
+                               |       3 decompositions (Claude, parallel)
+                               |          |
+                               |       3 verifications (Claude, parallel)
+                               |          |
+                               |          v
+                               |    Selector Agent
+                               |    (picks best proof)
+                               |          |
+                               v          v
+                          Verdict Agent
+                          (DONE / CONTINUE)
                                |
-                               v
-                    proof_effort_summary.md
+                    +----------+----------+
+                    |                     |
+                  DONE               CONTINUE
+                    |                     |
+                    v                     v
+              +----------+          next round
+              | Summary  |
+              | Agent    |   Stage 2
+              +----------+
+                    |
+                    v
+         proof_effort_summary.md
 ```

@@ -15,6 +15,63 @@ class CallResult:
     raw: dict
 
 
+def call_claude(
+    prompt: str,
+    working_dir: str = ".",
+    model: str = "sonnet",
+    system_prompt: str = "",
+) -> CallResult:
+    """Call Claude CLI with JSON output to extract metadata.
+
+    Args:
+        prompt: The prompt string to send.
+        working_dir: Working directory for the agent (cwd for subprocess).
+            The agent can read/write files relative to this directory.
+        model: Model name (e.g. "sonnet", "opus", or a full model ID).
+        system_prompt: Optional system prompt to append.
+    """
+    cmd = [
+        "claude",
+        "-p",
+        "--output-format", "json",
+        "--dangerously-skip-permissions",
+        "--model", model,
+    ]
+    if system_prompt:
+        cmd += ["--append-system-prompt", system_prompt]
+    cmd.append(prompt)
+
+    result = subprocess.run(
+        cmd,
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=working_dir,
+    )
+
+    data = json.loads(result.stdout)
+
+    # Aggregate token usage across all models
+    input_tokens = 0
+    output_tokens = 0
+    cached_tokens = 0
+    tool_calls = {}
+
+    for _, model_stats in data.get("modelUsage", {}).items():
+        input_tokens += model_stats.get("inputTokens", 0)
+        output_tokens += model_stats.get("outputTokens", 0)
+        cached_tokens += model_stats.get("cacheReadInputTokens", 0)
+
+    return CallResult(
+        response=data.get("result", ""),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cached_tokens=cached_tokens,
+        tool_calls=tool_calls,
+        raw=data,
+    )
+
+
 def call_codex(prompt: str) -> CallResult:
     """Call Codex with JSON output to extract metadata."""
     result = subprocess.run(
@@ -124,7 +181,15 @@ def call_gemini(prompt: str) -> CallResult:
 if __name__ == "__main__":
     test_prompt = "what is 1+1"
 
-    print("=== Codex ===")
+    print("=== Claude ===")
+    claude_result = call_claude(test_prompt)
+    print(f"Response: {claude_result.response}")
+    print(f"Input tokens: {claude_result.input_tokens}")
+    print(f"Output tokens: {claude_result.output_tokens}")
+    print(f"Cached tokens: {claude_result.cached_tokens}")
+    print(f"Tool calls: {claude_result.tool_calls}")
+
+    print("\n=== Codex ===")
     codex_result = call_codex(test_prompt)
     print(f"Response: {codex_result.response}")
     print(f"Input tokens: {codex_result.input_tokens}")

@@ -1,6 +1,19 @@
 pipeline:
   max_proof_iterations: 9
 
+
+  # Decomposition is a step where a separate agent breaks the proof into fine-grained
+  # numbered "miniclaims" with dependency graphs and a hierarchical Proof Architecture,
+  # before handing that structure to the verification agent. This gives the verifier a
+  # pre-built checklist to verify claim-by-claim.
+  #
+  # When skip_decomposition is true, the decomposition step is removed. Instead the
+  # verification agent reads the proof directly, identifies logical steps on its own,
+  # and verifies each one inline. This saves one full agent call per round (or per model
+  # in parallel mode) at the cost of the verifier doing double duty.
+  # Easy problems are unaffected — they never use decomposition regardless of this setting.
+  skip_decomposition: true
+
   # Multi-model parallel proof search.
   # When enabled: hard problems run Claude + Codex + Gemini in parallel each round,
   #   with a selector agent picking the best proof. (3x cost per round)
@@ -14,7 +27,7 @@ claude:
   permission_mode: "bypassPermissions"
 
   # Choose ONE provider: "subscription", "bedrock", or "api_key"
-  provider: "bedrock"
+  provider: "subscription"
 
   # --- Option 1: Claude subscription (Pro/Max) ---
   # No API key needed. Model is a shorthand: "opus", "sonnet", "haiku"

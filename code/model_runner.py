@@ -4,15 +4,117 @@
 Provides async wrappers around each provider's CLI, returning response text
 and feeding token usage into the pipeline's TokenTracker.
 
-Claude calls are delegated to the existing ``run_agent()`` in pipeline.py.
-Codex and Gemini are invoked via their respective CLIs (subprocess), wrapped
-in ``asyncio`` executors so the main event loop stays non-blocking.
+All three providers are invoked via their respective CLIs (subprocess),
+wrapped in ``asyncio`` executors so the main event loop stays non-blocking.
 """
 
 import asyncio
 import json
+import os
 import subprocess
 from datetime import datetime
+
+
+# ---------------------------------------------------------------------------
+# Claude wrapper
+# ---------------------------------------------------------------------------
+
+async def run_claude_agent(
+    prompt: str,
+    working_dir: str,
+    claude_opts: dict,
+    logger=None,
+    tracker=None,
+    call_name: str = "",
+    instructions: str | None = None,
+) -> str:
+    """Run the Claude CLI as a proof-search agent. Returns response text.
+
+    Args:
+        prompt: The full prompt string to send.
+        working_dir: Directory the agent operates in (cwd for subprocess).
+        claude_opts: Dict with keys: cli_path, model, env.
+        logger: Optional PipelineLogger for streaming output.
+        tracker: Optional TokenTracker for recording token usage.
+        call_name: Human-readable label for this call.
+        instructions: Optional system prompt to append.
+    """
+    cli_path = claude_opts.get("cli_path", "claude")
+    model = claude_opts.get("model", "opus")
+    extra_env = claude_opts.get("env", {})
+
+    cmd = [
+        cli_path,
+        "-p",
+        "--output-format", "json",
+        "--dangerously-skip-permissions",
+        "--model", model,
+    ]
+    if instructions:
+        cmd += ["--append-system-prompt", instructions]
+    cmd.append(prompt)
+
+    # Build environment with provider-specific vars (bedrock, api_key)
+    env = None
+    if extra_env:
+        env = os.environ.copy()
+        env.update(extra_env)
+
+    def _call():
+        return subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            text=True,
+            cwd=working_dir,
+            env=env,
+        )
+
+    start = datetime.now()
+    if logger:
+        logger.log(f"[Claude] Starting {call_name} (model={model})")
+
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _call)
+    except Exception as exc:
+        if logger:
+            logger.log(f"[Claude] ERROR: {exc}")
+        if tracker:
+            elapsed = (datetime.now() - start).total_seconds()
+            tracker.record(call_name or "claude", 0, 0, elapsed,
+                           provider="claude", model=model)
+        return ""
+
+    elapsed = (datetime.now() - start).total_seconds()
+
+    # --- Parse JSON output ---
+    response = ""
+    input_tokens = 0
+    output_tokens = 0
+
+    try:
+        data = json.loads(result.stdout)
+        response = data.get("result", "")
+
+        for _, model_stats in data.get("modelUsage", {}).items():
+            input_tokens += model_stats.get("inputTokens", 0)
+            output_tokens += model_stats.get("outputTokens", 0)
+    except (json.JSONDecodeError, ValueError) as exc:
+        if logger:
+            logger.log(f"[Claude] JSON parse error: {exc}")
+        response = result.stdout.strip()
+
+    if result.returncode != 0 and logger:
+        logger.log(f"[Claude] Non-zero exit code: {result.returncode}")
+
+    if logger:
+        logger.log(f"[Claude] Completed {call_name} in {elapsed:.0f}s "
+                    f"({input_tokens} in / {output_tokens} out)")
+
+    if tracker:
+        tracker.record(call_name or "claude", input_tokens, output_tokens,
+                       elapsed, provider="claude", model=model)
+
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -56,9 +158,8 @@ async def run_codex_agent(
     def _call():
         return subprocess.run(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
             text=True,
-            timeout=3600,
             cwd=working_dir,
         )
 
@@ -68,14 +169,6 @@ async def run_codex_agent(
 
     try:
         result = await asyncio.get_event_loop().run_in_executor(None, _call)
-    except subprocess.TimeoutExpired:
-        if logger:
-            logger.log(f"[Codex] TIMEOUT after 3600s for {call_name}")
-        if tracker:
-            elapsed = (datetime.now() - start).total_seconds()
-            tracker.record(call_name or "codex", 0, 0, elapsed,
-                           provider="codex", model=model)
-        return ""
     except Exception as exc:
         if logger:
             logger.log(f"[Codex] ERROR: {exc}")
@@ -110,12 +203,6 @@ async def run_codex_agent(
             logger.log(f"[Codex] JSON parse error: {exc}")
         # Fall back to raw stdout as response
         response = result.stdout.strip()
-
-    if result.stderr and logger:
-        # Log stderr but don't treat it as a failure — CLIs often emit
-        # progress info on stderr.
-        for line in result.stderr.strip().splitlines()[:10]:
-            logger.log(f"[Codex stderr] {line}")
 
     if logger:
         logger.log(f"[Codex] Completed {call_name} in {elapsed:.0f}s "
@@ -169,9 +256,8 @@ async def run_gemini_agent(
             env["GEMINI_API_KEY"] = api_key
         return subprocess.run(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
             text=True,
-            timeout=3600,
             cwd=working_dir,
             env=env,
         )
@@ -182,14 +268,6 @@ async def run_gemini_agent(
 
     try:
         result = await asyncio.get_event_loop().run_in_executor(None, _call)
-    except subprocess.TimeoutExpired:
-        if logger:
-            logger.log(f"[Gemini] TIMEOUT after 3600s for {call_name}")
-        if tracker:
-            elapsed = (datetime.now() - start).total_seconds()
-            tracker.record(call_name or "gemini", 0, 0, elapsed,
-                           provider="gemini", model=model)
-        return ""
     except Exception as exc:
         if logger:
             logger.log(f"[Gemini] ERROR: {exc}")
@@ -219,10 +297,6 @@ async def run_gemini_agent(
         if logger:
             logger.log(f"[Gemini] JSON parse error: {exc}")
         response = result.stdout.strip()
-
-    if result.stderr and logger:
-        for line in result.stderr.strip().splitlines()[:10]:
-            logger.log(f"[Gemini stderr] {line}")
 
     if logger:
         logger.log(f"[Gemini] Completed {call_name} in {elapsed:.0f}s "
@@ -258,7 +332,7 @@ async def run_model(
         prompt: The full prompt string.
         working_dir: Agent's working directory.
         config: Full pipeline config dict (with claude/codex/gemini sections).
-        claude_opts: Pre-built ClaudeAgent options (required when provider="claude").
+        claude_opts: Claude CLI options dict (required when provider="claude").
         logger: Optional PipelineLogger.
         tracker: Optional TokenTracker.
         call_name: Human-readable label.
@@ -268,13 +342,10 @@ async def run_model(
         The agent's response text.
     """
     if provider == "claude":
-        # Import here to avoid circular dependency — pipeline.py defines run_agent
-        from pipeline import run_agent
-        return await run_agent(
-            claude_opts, prompt, logger,
+        return await run_claude_agent(
+            prompt, working_dir, claude_opts or {},
+            logger=logger, tracker=tracker, call_name=call_name,
             instructions=instructions,
-            tracker=tracker,
-            call_name=call_name,
         )
     elif provider == "codex":
         return await run_codex_agent(

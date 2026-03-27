@@ -12,6 +12,8 @@ Reply with ONLY the single word **'DONE'** if ALL of the following criteria are 
 4. **Correctness:** All mathematical claims, computations, and cited results are correct
 5. **Overall Verdict in the verification file is PASS**
 
+Be strict and very conservative!
+
 Reply with ONLY the single word **'CONTINUE'** otherwise.
 
 ## Important

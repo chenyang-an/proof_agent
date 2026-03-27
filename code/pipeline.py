@@ -20,11 +20,11 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 from datetime import datetime
 
 import yaml
-from agent_framework.anthropic import ClaudeAgent
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ def load_prompt(prompts_dir: str, name: str, **kwargs) -> str:
 
 
 def make_claude_options(claude_cfg: dict, working_dir: str) -> dict:
-    """Build ClaudeAgent default_options from config.
+    """Build options dict for the Claude CLI subprocess runner.
 
     Supports three providers:
       - "subscription": Claude Pro/Max subscription (no keys, shorthand model names)
@@ -71,12 +71,8 @@ def make_claude_options(claude_cfg: dict, working_dir: str) -> dict:
     return {
         "cli_path": claude_cfg.get("cli_path", "claude"),
         "model": model,
-        "permission_mode": claude_cfg.get("permission_mode", "bypassPermissions"),
         "cwd": working_dir,
         "env": env,
-        # 1 GB buffer — the default 1 MB is too small for agents that run
-        # symbolic computations producing large expressions.
-        "max_buffer_size": 1000 * 1024 * 1024,
     }
 
 
@@ -175,7 +171,7 @@ def _parallel_round_complete(round_dir: str) -> bool:
     return _file_nonempty(os.path.join(round_dir, "selection.md"))
 
 
-def detect_resume_state(output_dir: str) -> tuple[bool, int, str]:
+def detect_resume_state(output_dir: str, skip_decomposition: bool = False) -> tuple[bool, int, str]:
     """Scan the output directory for progress from a previous run.
 
     Returns (skip_survey, start_round, resume_from_step):
@@ -194,6 +190,9 @@ def detect_resume_state(output_dir: str) -> tuple[bool, int, str]:
           "parallel_decomposition"  — proof searches done, resume from decomposition
           "parallel_verification"   — decompositions done, resume from verification
           "parallel_selection"      — verifications done, resume from selector
+
+        When skip_decomposition=True, "decomposition" and "parallel_decomposition"
+        are never returned — rounds go directly from proof search to verification.
 
     Side effects:
       - Deletes the last round directory if proof search did NOT complete
@@ -255,13 +254,19 @@ def detect_resume_state(output_dir: str) -> tuple[bool, int, str]:
             print(f"  Round {last}: verifications complete, selection incomplete — will resume from selection")
             return skip_survey, last, "parallel_selection"
 
-        if len(models_with_decomp) >= len(models_with_proof) and models_with_decomp:
-            print(f"  Round {last}: decompositions complete, verification incomplete — will resume from verification")
-            return skip_survey, last, "parallel_verification"
+        if skip_decomposition:
+            # No decomposition step — go directly from proof search to verification
+            if models_with_proof:
+                print(f"  Round {last}: proof search complete, verification incomplete — will resume from verification")
+                return skip_survey, last, "parallel_verification"
+        else:
+            if len(models_with_decomp) >= len(models_with_proof) and models_with_decomp:
+                print(f"  Round {last}: decompositions complete, verification incomplete — will resume from verification")
+                return skip_survey, last, "parallel_verification"
 
-        if models_with_proof:
-            print(f"  Round {last}: proof search complete for {models_with_proof}, decomposition incomplete — will resume from decomposition")
-            return skip_survey, last, "parallel_decomposition"
+            if models_with_proof:
+                print(f"  Round {last}: proof search complete for {models_with_proof}, decomposition incomplete — will resume from decomposition")
+                return skip_survey, last, "parallel_decomposition"
 
         # No proof search completed — delete and restart
         proof_file = os.path.join(output_dir, "proof.md")
@@ -278,19 +283,27 @@ def detect_resume_state(output_dir: str) -> tuple[bool, int, str]:
     decomp_ok = _file_nonempty(os.path.join(last_dir, "proof_decomposition.md"))
     verify_ok = _file_nonempty(os.path.join(last_dir, "verification_result.md"))
 
-    if status_ok and decomp_ok and verify_ok:
-        # Last round is fully complete — resume from the next one.
-        return skip_survey, last + 1, "proof_search"
+    if skip_decomposition:
+        # No decomposition file expected — only check proof_status and verification
+        if status_ok and verify_ok:
+            return skip_survey, last + 1, "proof_search"
+        if status_ok and not verify_ok:
+            print(f"  Round {last}: proof search complete, verification incomplete — will resume from verification")
+            return skip_survey, last, "verification"
+    else:
+        if status_ok and decomp_ok and verify_ok:
+            # Last round is fully complete — resume from the next one.
+            return skip_survey, last + 1, "proof_search"
 
-    if status_ok and decomp_ok and not verify_ok:
-        # Proof search + decomposition completed but verification didn't.
-        print(f"  Round {last}: decomposition complete, verification incomplete — will resume from verification")
-        return skip_survey, last, "verification"
+        if status_ok and decomp_ok and not verify_ok:
+            # Proof search + decomposition completed but verification didn't.
+            print(f"  Round {last}: decomposition complete, verification incomplete — will resume from verification")
+            return skip_survey, last, "verification"
 
-    if status_ok and not decomp_ok:
-        # Proof search completed but decomposition didn't.
-        print(f"  Round {last}: proof search complete, decomposition incomplete — will resume from decomposition")
-        return skip_survey, last, "decomposition"
+        if status_ok and not decomp_ok:
+            # Proof search completed but decomposition didn't.
+            print(f"  Round {last}: proof search complete, decomposition incomplete — will resume from decomposition")
+            return skip_survey, last, "decomposition"
 
     # Proof search didn't complete — delete the round and restore proof.md.
     proof_file = os.path.join(output_dir, "proof.md")
@@ -494,47 +507,6 @@ class TokenTracker:
 # Agent runners
 # ---------------------------------------------------------------------------
 
-def _format_content_for_log(content) -> str | None:
-    """Format a Content object into a human-readable log line."""
-    ctype = getattr(content, "type", None)
-    if ctype is None:
-        return None
-
-    ctype_str = str(ctype)
-
-    if "function_call" in ctype_str:
-        name = getattr(content, "name", "") or ""
-        args = getattr(content, "arguments", "") or ""
-        if isinstance(args, dict):
-            cmd = args.get("command", "")
-            if cmd:
-                preview = cmd[:200] + ("..." if len(cmd) > 200 else "")
-                return f">>> Tool: {name} - {preview}"
-            args_preview = str(args)[:150]
-            return f">>> Tool: {name}({args_preview})"
-        return f">>> Tool: {name}"
-
-    if "shell_tool" in ctype_str or "shell_command" in ctype_str:
-        cmds = getattr(content, "commands", None) or []
-        cmd_str = "; ".join(cmds)[:200] if cmds else ""
-        return f">>> Shell: {cmd_str}" if cmd_str else None
-
-    if "function_result" in ctype_str:
-        name = getattr(content, "name", "") or ""
-        exc = getattr(content, "exception", None)
-        if exc:
-            return f"<<< Result ({name}): ERROR - {str(exc)[:100]}"
-        return None
-
-    if "text" in ctype_str:
-        text = getattr(content, "text", "") or ""
-        if len(text) > 20:
-            return text[:300] + ("..." if len(text) > 300 else "")
-        return None
-
-    return None
-
-
 async def run_agent(
     claude_opts: dict,
     prompt: str,
@@ -544,99 +516,94 @@ async def run_agent(
     tracker: TokenTracker | None = None,
     call_name: str = "",
 ) -> str:
-    """Run a single ClaudeAgent call with streaming output logged in real time."""
-    start_time = datetime.now()
-    text_buffer = ""
+    """Run a Claude CLI call via subprocess and return the response text.
 
-    def flush_text():
-        nonlocal text_buffer
-        if logger and text_buffer.strip():
-            logger.log(text_buffer.rstrip())
-        text_buffer = ""
+    Uses ``claude -p --output-format json`` to get structured output with
+    token usage. The agent runs in the working directory specified by
+    ``claude_opts["cwd"]`` and has full tool access (file read/write, bash).
+    """
+    cli_path = claude_opts.get("cli_path", "claude")
+    model = claude_opts.get("model", "opus")
+    cwd = claude_opts.get("cwd", ".")
+    extra_env = claude_opts.get("env", {})
 
-    agent_kwargs = {}
-    if tools:
-        agent_kwargs["tools"] = tools
+    cmd = [
+        cli_path,
+        "-p",
+        "--output-format", "json",
+        "--dangerously-skip-permissions",
+        "--model", model,
+    ]
     if instructions:
-        agent_kwargs["instructions"] = instructions
+        cmd += ["--append-system-prompt", instructions]
+    cmd.append(prompt)
 
-    # Log starting message
+    start_time = datetime.now()
     if logger:
-        model = claude_opts.get("model", "unknown")
         logger.log(f"[Claude] Starting {call_name} (model={model})")
 
-    # Import ResultMessage to capture usage from the CLI's result event
-    from agent_framework_claude._agent import ResultMessage
+    # Build environment with provider-specific vars (bedrock, api_key)
+    env = None
+    if extra_env:
+        env = os.environ.copy()
+        env.update(extra_env)
 
-    result_msg = None  # Will capture the ResultMessage during streaming
+    def _call():
+        return subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            text=True,
+            cwd=cwd,
+            env=env,
+        )
 
-    async with ClaudeAgent(default_options=claude_opts, **agent_kwargs) as agent:
-        # Intercept at the client level to capture ResultMessage
-        if hasattr(agent, "_client") and agent._client:
-            original_receive = agent._client.receive_response
-
-            async def _patched_receive():
-                nonlocal result_msg
-                async for message in original_receive():
-                    if isinstance(message, ResultMessage):
-                        result_msg = message
-                    yield message
-
-            agent._client.receive_response = _patched_receive
-
-        stream = agent.run(prompt, stream=True)
-        async for update in stream:
-            if logger and hasattr(update, "contents") and update.contents:
-                for content in update.contents:
-                    ctype_str = str(getattr(content, "type", ""))
-                    if "text" in ctype_str:
-                        delta = getattr(content, "text", "") or ""
-                        text_buffer += delta
-                        while "\n" in text_buffer:
-                            line, text_buffer = text_buffer.split("\n", 1)
-                            if line.strip():
-                                logger.log(line)
-                    else:
-                        flush_text()
-                        line = _format_content_for_log(content)
-                        if line:
-                            logger.log(line)
-
-        flush_text()
-        final = await stream.get_final_response()
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _call)
+    except Exception as exc:
         elapsed = (datetime.now() - start_time).total_seconds()
-        final_text = final.text or ""
-
-        # Extract token counts — try usage_details first, then captured ResultMessage
-        input_tokens = 0
-        output_tokens = 0
-        usage = getattr(final, "usage_details", None)
-        if usage:
-            input_tokens = (usage.get("input_token_count", 0) if isinstance(usage, dict)
-                            else getattr(usage, "input_token_count", 0)) or 0
-            output_tokens = (usage.get("output_token_count", 0) if isinstance(usage, dict)
-                             else getattr(usage, "output_token_count", 0)) or 0
-
-        # Fallback: use captured ResultMessage from CLI
-        if not (input_tokens or output_tokens) and result_msg and result_msg.usage:
-            ru = result_msg.usage
-            # input_tokens only counts non-cached input; add cache tokens for the real total
-            input_tokens = (
-                (ru.get("input_tokens", 0) or 0)
-                + (ru.get("cache_creation_input_tokens", 0) or 0)
-                + (ru.get("cache_read_input_tokens", 0) or 0)
-            )
-            output_tokens = ru.get("output_tokens", 0) or 0
-
-        if tracker:
-            tracker.record(call_name or "agent", input_tokens, output_tokens, elapsed)
-
-        # Log completion message
         if logger:
-            logger.log(f"[Claude] Completed {call_name} in {elapsed:.0f}s "
-                       f"({input_tokens} in / {output_tokens} out)")
+            logger.log(f"[Claude] ERROR: {exc}")
+        if tracker:
+            tracker.record(call_name or "agent", 0, 0, elapsed)
+        return ""
 
-        return final_text
+    elapsed = (datetime.now() - start_time).total_seconds()
+
+    # Parse JSON output
+    response = ""
+    input_tokens = 0
+    output_tokens = 0
+
+    try:
+        data = json.loads(result.stdout)
+        response = data.get("result", "")
+
+        for _, model_stats in data.get("modelUsage", {}).items():
+            input_tokens += model_stats.get("inputTokens", 0)
+            output_tokens += model_stats.get("outputTokens", 0)
+    except (json.JSONDecodeError, ValueError) as exc:
+        if logger:
+            logger.log(f"[Claude] JSON parse error: {exc}")
+        response = result.stdout.strip()
+
+    if result.returncode != 0 and logger:
+        logger.log(f"[Claude] Non-zero exit code: {result.returncode}")
+
+    # Log the response (truncated for readability)
+    if logger and response:
+        preview = response[:500] + ("..." if len(response) > 500 else "")
+        for line in preview.splitlines():
+            if line.strip():
+                logger.log(line)
+
+    if tracker:
+        tracker.record(call_name or "agent", input_tokens, output_tokens, elapsed)
+
+    if logger:
+        logger.log(f"[Claude] Completed {call_name} in {elapsed:.0f}s "
+                   f"({input_tokens} in / {output_tokens} out)")
+
+    return response
 
 
 async def run_agent_for_verdict(
@@ -722,11 +689,13 @@ async def _run_parallel_round(
     available_providers: list[str],
     human_help_dir: str,
     resume_from_step: str = "proof_search",
+    skip_decomposition: bool = False,
 ) -> str:
     """Execute one parallel round for hard-mode. Returns 'DONE' or 'CONTINUE'.
 
     Steps: parallel proof search → parallel decomposition → parallel verification
            → selector → verdict.
+    When skip_decomposition=True, the decomposition step is skipped entirely.
     """
     import asyncio as _asyncio
     from model_runner import run_model
@@ -765,14 +734,18 @@ async def _run_parallel_round(
     skip_proof_search = resume_from_step in (
         "parallel_decomposition", "parallel_verification", "parallel_selection",
     )
-    skip_decomposition = resume_from_step in (
+    skip_decomp_resume = resume_from_step in (
         "parallel_verification", "parallel_selection",
     )
     skip_verification = resume_from_step == "parallel_selection"
 
+    total_steps = 5 if skip_decomposition else 6
+    step = 0
+
     # ==================================================================
     # Step 1: PARALLEL PROOF SEARCH
     # ==================================================================
+    step += 1
     if skip_proof_search:
         logger.log(f"--- Resuming round {i}: skipping proof search (already complete) ---")
         logger.append_history(f"Iteration {i}: Parallel proof search SKIPPED (resume)")
@@ -782,7 +755,7 @@ async def _run_parallel_round(
         if os.path.exists(proof_file):
             shutil.copy2(proof_file, proof_backup)
 
-        logger.update_status(i, max_iterations, "1/6 Parallel Proof Search", "RUNNING",
+        logger.update_status(i, max_iterations, f"{step}/{total_steps} Parallel Proof Search", "RUNNING",
                              f"Running proof search on {len(providers)} models in parallel...")
         logger.append_history(f"Iteration {i}: Parallel proof search started ({', '.join(providers)})")
 
@@ -821,13 +794,17 @@ async def _run_parallel_round(
         logger.append_history(f"Iteration {i}: Parallel proof search completed")
 
     # ==================================================================
-    # Step 2: PARALLEL DECOMPOSITION (all Claude)
+    # Step 2: PARALLEL DECOMPOSITION (all Claude) — skipped when skip_decomposition
     # ==================================================================
     if skip_decomposition:
+        logger.log(f"--- Round {i}: skipping decomposition (skip_decomposition enabled) ---")
+        logger.append_history(f"Iteration {i}: Parallel decomposition SKIPPED (config)")
+    elif skip_decomp_resume:
         logger.log(f"--- Resuming round {i}: skipping decomposition (already complete) ---")
         logger.append_history(f"Iteration {i}: Parallel decomposition SKIPPED (resume)")
     else:
-        logger.update_status(i, max_iterations, "2/6 Parallel Decomposition", "RUNNING",
+        step += 1
+        logger.update_status(i, max_iterations, f"{step}/{total_steps} Parallel Decomposition", "RUNNING",
                              f"Decomposing {len(providers)} proofs in parallel (Claude)...")
         logger.append_history(f"Iteration {i}: Parallel decomposition started")
 
@@ -850,41 +827,59 @@ async def _run_parallel_round(
         logger.append_history(f"Iteration {i}: Parallel decomposition completed")
 
     # ==================================================================
-    # Step 3: PARALLEL VERIFICATION (all Claude)
+    # Step 3 (or 2 if skip_decomposition): PARALLEL VERIFICATION (all Claude)
     # ==================================================================
+    step += 1
     if skip_verification:
         logger.log(f"--- Resuming round {i}: skipping verification (already complete) ---")
         logger.append_history(f"Iteration {i}: Parallel verification SKIPPED (resume)")
     else:
-        logger.update_status(i, max_iterations, "3/6 Parallel Verification", "RUNNING",
+        verify_label = "direct" if skip_decomposition else "full"
+        logger.update_status(i, max_iterations, f"{step}/{total_steps} Parallel Verification ({verify_label})", "RUNNING",
                              f"Verifying {len(providers)} proofs in parallel (Claude)...")
-        logger.append_history(f"Iteration {i}: Parallel verification started")
+        logger.append_history(f"Iteration {i}: Parallel verification started ({verify_label})")
 
         async def _verify(provider):
             mdir = model_dirs[provider]
             m_proof = os.path.join(mdir, "proof.md")
-            m_decomp = os.path.join(mdir, "proof_decomposition.md")
             m_verify = os.path.join(mdir, "verification_result.md")
-            verify_prompt = load_prompt(
-                prompts_dir, "proof_verify.md",
-                problem_file=problem_file,
-                proof_file=m_proof,
-                decomposition_file=m_decomp,
-                output_file=m_verify,
-                output_dir=output_dir,
-            )
+
+            if skip_decomposition:
+                verify_prompt = load_prompt(
+                    prompts_dir, "proof_verify_direct.md",
+                    problem_file=problem_file,
+                    proof_file=m_proof,
+                    output_file=m_verify,
+                    output_dir=output_dir,
+                )
+            else:
+                m_decomp = os.path.join(mdir, "proof_decomposition.md")
+                verify_prompt = load_prompt(
+                    prompts_dir, "proof_verify.md",
+                    problem_file=problem_file,
+                    proof_file=m_proof,
+                    decomposition_file=m_decomp,
+                    output_file=m_verify,
+                    output_dir=output_dir,
+                )
             verify_prompt += f"\n\nThis is round {i}. Verifying {provider}'s proof. Write to {m_verify}."
             await run_agent(claude_opts, verify_prompt, logger,
                             tracker=tracker, call_name=f"Verification R{i} [{provider}]")
+
+            if not _file_nonempty(m_verify):
+                logger.log(f"WARNING — {m_verify} missing or empty after verification agent returned! "
+                           f"The agent may have failed to write the file (e.g. output too large for a single Write call).")
+                logger.append_history(f"Iteration {i}: WARNING — {provider} verification_result.md missing!")
 
         await _asyncio.gather(*[_verify(p) for p in providers])
         logger.append_history(f"Iteration {i}: Parallel verification completed")
 
     # ==================================================================
-    # Step 4: SELECTOR AGENT (Claude)
+    # Step 4 (or 3): SELECTOR AGENT (Claude)
     # ==================================================================
+    step += 1
     selection_file = os.path.join(round_dir, "selection.md")
-    logger.update_status(i, max_iterations, "4/6 Proof Selection", "RUNNING",
+    logger.update_status(i, max_iterations, f"{step}/{total_steps} Proof Selection", "RUNNING",
                          "Selecting best proof from verification reports...")
     logger.append_history(f"Iteration {i}: Proof selection started")
 
@@ -914,9 +909,10 @@ async def _run_parallel_round(
     logger.append_history(f"Iteration {i}: Proof selection completed")
 
     # ==================================================================
-    # Step 5: Copy selected proof to main proof.md
+    # Step 5 (or 4): Copy selected proof to main proof.md
     # ==================================================================
-    logger.update_status(i, max_iterations, "5/6 Applying Selection", "RUNNING",
+    step += 1
+    logger.update_status(i, max_iterations, f"{step}/{total_steps} Applying Selection", "RUNNING",
                          "Copying selected proof to main proof.md...")
     selected_model = _parse_selected_model(selection_file, providers)
     logger.log(f"Iteration {i}: Selected model = {selected_model}")
@@ -927,10 +923,11 @@ async def _run_parallel_round(
         shutil.copy2(selected_proof, proof_file)
 
     # ==================================================================
-    # Step 6: VERDICT AGENT (Claude) — uses ONLY selected verification
+    # Step 6 (or 5): VERDICT AGENT (Claude) — uses ONLY selected verification
     # ==================================================================
+    step += 1
     selected_verify = os.path.join(round_dir, selected_model, "verification_result.md")
-    logger.update_status(i, max_iterations, "6/6 Checking Verdict", "RUNNING",
+    logger.update_status(i, max_iterations, f"{step}/{total_steps} Checking Verdict", "RUNNING",
                          "Analyzing selected verification results...")
     logger.append_history(f"Iteration {i}: Checking verdict (using {selected_model}'s verification)")
 
@@ -972,6 +969,7 @@ async def run_proof_loop(
     resume_from_step: str = "proof_search",
     difficulty: str = "unknown",
     multi_model_config: dict | None = None,
+    skip_decomposition: bool = False,
 ) -> bool:
     """Run the proof search/decomposition/verification/verdict loop.
 
@@ -991,6 +989,8 @@ async def run_proof_loop(
         multi_model_config: Dict with keys "providers" (list[str]), "config" (full
             config dict). When set and difficulty is hard, enables parallel
             multi-model proof search.
+        skip_decomposition: When True, non-easy problems skip the decomposition
+            step and use direct verification (proof_verify_direct.md).
 
     Returns True if successful (DONE), False if max iterations reached.
     """
@@ -1073,6 +1073,7 @@ async def run_proof_loop(
                 available_providers=multi_model_config["providers"],
                 human_help_dir=human_help_dir,
                 resume_from_step=round_resume,
+                skip_decomposition=skip_decomposition,
             )
 
             if decision == "DONE":
@@ -1093,10 +1094,10 @@ async def run_proof_loop(
 
             # Determine which steps to skip for this round (resume case)
             skip_proof_search = (i == start_round and resume_from_step in ("decomposition", "verification"))
-            skip_decomposition = (i == start_round and resume_from_step == "verification")
+            skip_decomp_resume = (i == start_round and resume_from_step == "verification")
 
-            # Step labels depend on whether we're in easy mode (3 steps) or normal (4 steps)
-            total_steps = 3 if easy_mode else 4
+            # Step labels depend on mode: easy/skip_decomp = 3 steps, normal = 4 steps
+            total_steps = 3 if (easy_mode or skip_decomposition) else 4
 
             # ------------------------------------------------------------------
             # Step 1: Proof Search
@@ -1159,7 +1160,45 @@ async def run_proof_loop(
 
                 await run_agent(claude_opts, verify_prompt, logger,
                                 tracker=tracker, call_name=f"Verification (easy) R{i}")
+
+                if not _file_nonempty(verify_result_file):
+                    logger.log(f"WARNING — {verify_result_file} missing or empty after verification agent returned! "
+                               f"The agent may have failed to write the file (e.g. output too large for a single Write call).")
+                    logger.append_history(f"Iteration {i}: WARNING — verification_result.md missing!")
+
                 logger.append_history(f"Iteration {i}: Easy verification completed")
+
+                # Step 3/3: Verdict
+                logger.update_status(i, max_iterations, "3/3 Checking Verdict", "RUNNING", "Analyzing verification results...")
+                logger.append_history(f"Iteration {i}: Checking verdict")
+
+            elif skip_decomposition:
+                # ==============================================================
+                # SKIP-DECOMPOSITION MODE: direct verification (no miniclaims)
+                # ==============================================================
+
+                # Step 2/3: Direct Verification
+                logger.update_status(i, max_iterations, "2/3 Verification (direct)", "RUNNING", "Running direct verification agent...")
+                logger.append_history(f"Iteration {i}: Direct verification started")
+
+                verify_prompt = load_prompt(
+                    prompts_dir, "proof_verify_direct.md",
+                    problem_file=problem_file,
+                    proof_file=proof_file,
+                    output_file=verify_result_file,
+                    output_dir=output_dir,
+                )
+                verify_prompt += f"\n\nThis is round {i}. Write results to {verify_result_file}."
+
+                await run_agent(claude_opts, verify_prompt, logger,
+                                tracker=tracker, call_name=f"Verification (direct) R{i}")
+
+                if not _file_nonempty(verify_result_file):
+                    logger.log(f"WARNING — {verify_result_file} missing or empty after verification agent returned! "
+                               f"The agent may have failed to write the file (e.g. output too large for a single Write call).")
+                    logger.append_history(f"Iteration {i}: WARNING — verification_result.md missing!")
+
+                logger.append_history(f"Iteration {i}: Direct verification completed")
 
                 # Step 3/3: Verdict
                 logger.update_status(i, max_iterations, "3/3 Checking Verdict", "RUNNING", "Analyzing verification results...")
@@ -1171,7 +1210,7 @@ async def run_proof_loop(
                 # ==============================================================
 
                 # Step 2/4: Proof Decomposition
-                if skip_decomposition:
+                if skip_decomp_resume:
                     logger.log(f"--- Resuming round {i}: skipping decomposition (already complete) ---")
                     logger.append_history(f"Iteration {i}: Decomposition SKIPPED (resume)")
                 else:
@@ -1207,6 +1246,12 @@ async def run_proof_loop(
 
                 await run_agent(claude_opts, verify_prompt, logger,
                                 tracker=tracker, call_name=f"Verification R{i}")
+
+                if not _file_nonempty(verify_result_file):
+                    logger.log(f"WARNING — {verify_result_file} missing or empty after verification agent returned! "
+                               f"The agent may have failed to write the file (e.g. output too large for a single Write call).")
+                    logger.append_history(f"Iteration {i}: WARNING — verification_result.md missing!")
+
                 logger.append_history(f"Iteration {i}: Verification completed")
 
                 # Step 4/4: Verdict
@@ -1253,6 +1298,7 @@ async def main():
     pipeline_cfg = config.get("pipeline", {})
     claude_cfg = config.get("claude", {})
     max_proof = pipeline_cfg.get("max_proof_iterations", 9)
+    skip_decomp = pipeline_cfg.get("skip_decomposition", False)
 
     problem_file = os.path.abspath(args.input)
     output_dir = os.path.abspath(args.output)
@@ -1282,7 +1328,7 @@ async def main():
     if not os.path.exists(problem_copy):
         shutil.copy2(problem_file, problem_copy)
 
-    # Build ClaudeAgent options
+    # Build Claude CLI options
     claude_opts = make_claude_options(claude_cfg, output_dir)
 
     # Token usage tracker — writes TOKEN_USAGE.md after every agent call
@@ -1291,7 +1337,7 @@ async def main():
     # -------------------------------------------------------
     # Detect resume state
     # -------------------------------------------------------
-    skip_survey, start_round, resume_from_step = detect_resume_state(output_dir)
+    skip_survey, start_round, resume_from_step = detect_resume_state(output_dir, skip_decomp)
 
     print("=" * 60)
     print("  Proof Agent Pipeline")
@@ -1300,6 +1346,8 @@ async def main():
     print(f"  Output:     {output_dir}")
     print(f"  Max rounds: {max_proof}")
     print(f"  Token log:  {tracker.md_path}")
+    if skip_decomp:
+        print(f"  Skip decomposition: ON (direct verification for medium/hard)")
     if skip_survey or start_round > 1 or resume_from_step != "proof_search":
         print()
         print("  RESUMING previous run:")
@@ -1387,6 +1435,7 @@ async def main():
         resume_from_step=resume_from_step,
         difficulty=difficulty,
         multi_model_config=multi_model_config,
+        skip_decomposition=skip_decomp,
     )
 
     # -------------------------------------------------------

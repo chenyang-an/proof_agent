@@ -2,7 +2,7 @@
 
 ## Overview
 
-You are a mathematical proof evaluation expert. Three independent AI models have each attempted to prove the same mathematical problem. Each proof has been decomposed into miniclaims and independently verified. You must select the **single most promising proof** to carry forward.
+You are a mathematical proof evaluation expert. Three independent AI models have each attempted to prove the same mathematical problem. Each proof has been independently verified. You must select the **single most promising proof** to carry forward.
 
 ## Input Files
 
@@ -39,7 +39,7 @@ Read all three verification reports carefully. Then select the **single best pro
 
 2. **Overall Verdict**: A proof with an overall PASS verdict is strictly preferred over one with FAIL.
 
-3. **Fewest Failures**: Among FAIL verdicts, prefer the proof with the fewest FAIL or UNCERTAIN miniclaims. A proof that is 90% correct with one fixable gap is far more valuable than one that is 50% correct.
+3. **Fewest Failures**: Among FAIL verdicts, prefer the proof with the fewest FAIL or UNCERTAIN claims (miniclaims or steps, depending on the verification format). A proof that is 90% correct with one fixable gap is far more valuable than one that is 50% correct.
 
 4. **Quality of Partial Progress**: If failure counts are similar, consider:
    - Which proof has the strongest correct core argument?
@@ -57,7 +57,7 @@ Write your selection to `{selection_file}` using this exact format:
 
 ## Summary Table
 
-| Model | Overall Verdict | Miniclaims PASS | Miniclaims FAIL | Miniclaims UNCERTAIN | Problem-Statement Integrity |
+| Model | Overall Verdict | Claims PASS | Claims FAIL | Claims UNCERTAIN | Problem-Statement Integrity |
 |-------|----------------|-----------------|-----------------|---------------------|---------------------------|
 | Claude | ... | ... | ... | ... | ... |
 | Codex | ... | ... | ... | ... | ... |
@@ -69,7 +69,7 @@ Write your selection to `{selection_file}` using this exact format:
 
 ## Reasoning
 
-(Explain why this proof was selected over the other two. Be specific — reference miniclaim numbers, structural issues, or verification findings. Keep this to 2-4 sentences.)
+(Explain why this proof was selected over the other two. Be specific — reference claim/step numbers, structural issues, or verification findings. Keep this to 2-4 sentences.)
 
 ## Notes for Next Round
 
