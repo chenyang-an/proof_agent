@@ -1,6 +1,6 @@
 # Verdict Task: Proof Verification
 
-Read the verification result file at `{verification_result_file}`.
+> **Agentic task.** Read the input file first, then evaluate. The input file path is at the end of this prompt.
 
 ## Decision Criteria
 
@@ -23,3 +23,9 @@ Reply with ONLY the single word **'CONTINUE'** otherwise.
 - Do not include any explanation or additional text
 - If the verification result file is empty or missing, reply `CONTINUE`
 - If any single criterion fails, reply `CONTINUE`
+
+---
+
+## HERE IS THE INPUT FILE PATH:
+
+Read the verification result file at `{verification_result_file}`.

@@ -1,50 +1,10 @@
 # Natural Language Proof Search Task
 
+> **Agentic task.** Read the input files first, then think, plan, and work — use bash, computational tools, or any available resources as needed. Write the output files using tool calls according to the instructions. All input/output file paths and format specifications are at the end of this prompt.
+
 ## Overview
 
 You are a mathematical proof expert tasked with writing a complete, rigorous natural-language proof for a problem given in LaTeX.
-
-## Input Files
-
-### Problem Statement
-
-The problem is located at:
-```
-{problem_file}
-```
-
-Read this file carefully. It contains the problem statement in LaTeX.
-
-### Literature Survey
-
-Before this proof search began, an expert literature survey was conducted. The results are in:
-```
-{related_info_dir}/
-```
-
-This directory contains:
-- `problem_analysis.md` — problem classification, key objects, edge cases
-- `related_theorems.md` — applicable theorems, related results, useful lemmas, counterexamples
-
-**Read these files before starting your proof.** They contain critical intelligence gathered from a literature survey — similar problems, applicable theorems, and known results that may inform your approach.
-
-### Mathematical Strategy Guide
-
-A curated set of proof strategies and methodology principles is at:
-```
-{skill_file}
-```
-
-This covers proof orientation, core strategies (direct proof, induction, contradiction, decomposition), tactics for when you get stuck (counterexample search, contrapositive, viewpoint changes), self-checking discipline, and computational tool usage. **Read and internalize these principles before starting your proof.**
-
-### Current Proof Draft
-
-Your current proof draft is at:
-```
-{proof_file}
-```
-
-If this file is empty or only contains a placeholder, you are starting from scratch. Otherwise, you are refining a previous draft.
 
 ## CRITICAL: Round-Based Workflow — Read Previous Round, Log for Next Round
 
@@ -55,65 +15,6 @@ This proof search runs in multiple rounds. This is round {round_num}.
 - Use this information to pick up where the previous round left off and try **different** strategies.
 - **Search online for related work.** At the beginning of every round, use web search to look for related theorems, techniques, papers, or forum discussions (e.g., Math StackExchange, MathOverflow, ArXiv, Wikipedia) that may be relevant to the problem. Base your search queries on the previous round's status log — focus on the approaches that failed, the specific steps that were hard, and the techniques that were attempted. This way your searches are targeted rather than generic. Even if a literature survey was done earlier, new queries informed by what was actually tried (and what went wrong) may surface results the initial survey missed. Spend a few minutes on this before diving into proof writing.
 - **Check for human guidance.** Read any files in `{human_help_dir}` if the directory exists and is non-empty. A human may have left hints, suggestions, corrections, or opinions about the problem or about previous proof attempts. This input can be extremely valuable — a single human observation can unlock an approach you hadn't considered or point out a subtle error in your reasoning. Treat human guidance seriously, but still verify any claims independently.
-
-## Important: Output Files
-
-### Proof File
-
-Save your complete proof to:
-```
-{proof_file}
-```
-
-Write the proof in Markdown format with the following structure:
-
-```markdown
-# Proof
-
-## Problem Statement
-(Copy the problem from {problem_file} verbatim. Do NOT paraphrase or alter it.)
-
-## Proof
-(Your complete proof here. Use LaTeX math notation where appropriate: $...$, $$...$$)
-
-## Key Ideas
-(Brief summary of the main proof strategy and key insights)
-```
-
-**No output files means the proof failed directly. Always remember to output the proof and the proof_status_log in the correct path.**
-
-**Save progress incrementally.** Do NOT try to write the entire proof in one shot. As soon as you have a meaningful skeleton, a partial argument, or substantial progress on a key step, **write it to `{proof_file}` immediately** — then keep working to fill in gaps and refine. If you run out of context or hit an error late in a long attempt, all unsaved work is lost. A partial proof with honest gaps marked (e.g., "TODO: show this bound holds") is far more useful to the next round than nothing at all. Save a skeleton first, then iteratively strengthen it. Every time you complete a meaningful sub-argument, update the file.
-
-### Proof Status Log
-
-At the END of your round, **you MUST save a complete proof status log** to:
-```
-{proof_status_file}
-```
-
-Include:
-- The approach(es) you tried
-- For each failed approach: why it failed
-- For the final approach: a brief summary of why it works
-- Any remaining concerns or potential issues
-
-Log **every approach you tried and why it failed or succeeded**. This file is the **primary way the next round learns what happened**. If you don't log your failed approaches, the next round will waste time repeating the same mistakes.
-
-### Error Log
-
-If you encounter any errors during this call — tool failures, runtime exceptions, file I/O issues, context window limits, or unexpected behavior — record them in:
-```
-{error_file}
-```
-**Always create this file.** If no errors occur, write an empty file. If errors occur, include the error message, what you were doing when it occurred, and any workaround you applied.
-
-### Temporary Files
-
-If you need to create temporary files (e.g., scratch work, exploratory computations, scripts), save them in:
-```
-{output_dir}/tmp/
-```
-Create this directory if it does not exist. Do NOT place temporary files anywhere else.
 
 ## CRITICAL: Do NOT Shy Away from Difficulty
 
@@ -231,25 +132,6 @@ Printing large symbolic expressions, matrices, or long lists to stdout wastes yo
 - **Solving auxiliary equations** — If the proof requires finding a specific value, root, or closed form, let SymPy/SageMath find it.
 - **Matrix and linear algebra claims** — Verify rank, determinant, eigenvalue, or invertibility claims computationally.
 
-### Example workflow:
-
-```python
-# Quick SymPy check: is this identity correct?
-from sympy import symbols, simplify
-n, k = symbols('n k', positive=True, integer=True)
-lhs = ...  # your expression
-rhs = ...  # claimed simplification
-diff = simplify(lhs - rhs)
-print("Simplified to zero:", diff == 0)  # Print only the boolean
-if diff != 0:
-    s = str(diff)
-    if len(s) > 500:
-        with open('tmp/diff_expr.txt', 'w') as f:
-            f.write(s)
-        print("Non-zero diff written to file,", len(s), "chars")
-    else:
-        print("Diff:", diff)
-```
 
 **Don't be shy about using tools.** A 5-line Python script that confirms (or refutes) a key step is worth more than 20 minutes of manual algebra. If one tool doesn't work well for your problem, try another.
 
@@ -259,3 +141,106 @@ if diff != 0:
 
 - If you are refining a previous draft, read the previous verification result to understand what was wrong.
 - Focus on mathematical rigor. A proof that is "mostly right" is not a proof.
+
+---
+
+## HERE ARE THE INPUT FILE PATHS:
+
+### Problem Statement
+
+The problem is located at:
+```
+{problem_file}
+```
+
+Read this file carefully. It contains the problem statement in LaTeX.
+
+### Literature Survey
+
+Before this proof search began, an expert literature survey was conducted. The results are in:
+```
+{related_info_dir}/
+```
+
+This directory contains:
+- `problem_analysis.md` — problem classification, key objects, edge cases
+- `related_theorems.md` — applicable theorems, related results, useful lemmas, counterexamples
+
+**Read these files before starting your proof.** They contain critical intelligence gathered from a literature survey — similar problems, applicable theorems, and known results that may inform your approach.
+
+### Mathematical Strategy Guide
+
+A curated set of proof strategies and methodology principles is at:
+```
+{skill_file}
+```
+
+This covers proof orientation, core strategies (direct proof, induction, contradiction, decomposition), tactics for when you get stuck (counterexample search, contrapositive, viewpoint changes), self-checking discipline, and computational tool usage. **Read and internalize these principles before starting your proof.**
+
+### Current Proof Draft
+
+Your current proof draft is at:
+```
+{proof_file}
+```
+
+If this file is empty or only contains a placeholder, you are starting from scratch. Otherwise, you are refining a previous draft.
+
+## HERE ARE THE OUTPUT FILE PATHS:
+
+### Proof File
+
+Save your complete proof to:
+```
+{proof_file}
+```
+
+Write the proof in Markdown format with the following structure:
+
+```markdown
+# Proof
+
+## Problem Statement
+(Copy the problem from {problem_file} verbatim. Do NOT paraphrase or alter it.)
+
+## Proof
+(Your complete proof here. Use LaTeX math notation where appropriate: $...$, $$...$$)
+
+## Key Ideas
+(Brief summary of the main proof strategy and key insights)
+```
+
+**No output files means the proof failed directly. Always remember to output the proof and the proof_status_log in the correct path.**
+
+**Save progress incrementally.** Do NOT try to write the entire proof in one shot. As soon as you have a meaningful skeleton, a partial argument, or substantial progress on a key step, **write it to `{proof_file}` immediately** — then keep working to fill in gaps and refine. If you run out of context or hit an error late in a long attempt, all unsaved work is lost. A partial proof with honest gaps marked (e.g., "TODO: show this bound holds") is far more useful to the next round than nothing at all. Save a skeleton first, then iteratively strengthen it. Every time you complete a meaningful sub-argument, update the file.
+
+### Proof Status Log
+
+At the END of your round, **you MUST save a complete proof status log** to:
+```
+{proof_status_file}
+```
+
+Include:
+- The approach(es) you tried
+- For each failed approach: why it failed
+- For the final approach: a brief summary of why it works
+- Any remaining concerns or potential issues
+
+Log **every approach you tried and why it failed or succeeded**. This file is the **primary way the next round learns what happened**. If you don't log your failed approaches, the next round will waste time repeating the same mistakes.
+
+### Error Log
+
+If you encounter any errors during this call — tool failures, runtime exceptions, file I/O issues, context window limits, or unexpected behavior — record them in:
+```
+{error_file}
+```
+**Always create this file.** If no errors occur, write an empty file. If errors occur, include the error message, what you were doing when it occurred, and any workaround you applied.
+
+### Temporary Files
+
+If you need to create temporary files (e.g., scratch work, exploratory computations, scripts), save them in:
+```
+{output_dir}/tmp/
+```
+Create this directory if it does not exist. Do NOT place temporary files anywhere else.

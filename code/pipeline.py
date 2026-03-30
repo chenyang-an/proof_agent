@@ -146,6 +146,51 @@ def _check_expected_files(
         raise RuntimeError(msg)
 
 
+def _fallback_save_response(
+    response: str,
+    primary_files: list[str],
+    error_files: list[str],
+    logger=None,
+    step_name: str = "",
+) -> None:
+    """Save agent response to missing primary output files as fallback.
+
+    If the agent wrote the file via tool use, this is a no-op.
+    If the agent didn't, the text response is saved so work isn't lost.
+    When fallback triggers, error log files record that the pipeline
+    (not the agent) saved the output.
+    """
+    fallback_used = []
+    for path in primary_files:
+        if not os.path.exists(path) and response.strip():
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(response)
+            fallback_used.append(path)
+            if logger:
+                logger.log(f"  Fallback: saved response to {path}")
+    # Write or append fallback notice to error files
+    if fallback_used:
+        notice = (f"\n\n# Pipeline Fallback Notice\n\n"
+                  f"**Step:** {step_name}\n\n"
+                  f"The agent did not write the following expected output file(s) "
+                  f"via tool use. The pipeline saved the agent's text response "
+                  f"as a fallback:\n\n")
+        for fb in fallback_used:
+            notice += f"- `{fb}`\n"
+        notice += f"\nThe content may not be properly formatted for this file.\n"
+        for path in error_files:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "a") as f:
+                f.write(notice)
+    else:
+        for path in error_files:
+            if not os.path.exists(path):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w") as f:
+                    f.write("")
+
+
 def _parse_verdict_from_file(path: str) -> str:
     """Parse the Overall Verdict from a verification_result.md file.
 
@@ -579,6 +624,7 @@ async def run_agent(
         return subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             cwd=cwd,
             env=env,
@@ -589,12 +635,16 @@ async def run_agent(
     except Exception as exc:
         elapsed = (datetime.now() - start_time).total_seconds()
         if logger:
-            logger.log(f"[Claude] ERROR: {exc}")
+            logger.log(f"[Claude] EXCEPTION: {type(exc).__name__}: {exc}")
         if tracker:
             tracker.record(call_name or "agent", 0, 0, elapsed)
         return ""
 
     elapsed = (datetime.now() - start_time).total_seconds()
+
+    # Log stderr if present (contains error messages from CLI)
+    if result.stderr and result.stderr.strip() and logger:
+        logger.log(f"[Claude] stderr:\n{result.stderr.strip()}")
 
     # Parse JSON output
     response = ""
@@ -611,6 +661,8 @@ async def run_agent(
     except (json.JSONDecodeError, ValueError) as exc:
         if logger:
             logger.log(f"[Claude] JSON parse error: {exc}")
+            if result.stdout.strip():
+                logger.log(f"[Claude] Raw stdout (first 1000 chars): {result.stdout.strip()[:1000]}")
         response = result.stdout.strip()
 
     if result.returncode != 0 and logger:
@@ -689,8 +741,14 @@ async def run_literature_survey(
         error_file=os.path.join(related_info_dir, "error_literature_survey.md"),
     )
 
-    await run_agent(claude_opts, survey_prompt, logger, instructions=math_skill or None,
-                    tracker=tracker, call_name="Literature Survey")
+    response = await run_agent(claude_opts, survey_prompt, logger, instructions=math_skill or None,
+                               tracker=tracker, call_name="Literature Survey")
+    _fallback_save_response(response, [
+        os.path.join(related_info_dir, "difficulty_evaluation.md"),
+        os.path.join(related_info_dir, "problem_analysis.md"),
+        os.path.join(related_info_dir, "related_theorems.md"),
+    ], [os.path.join(related_info_dir, "error_literature_survey.md")],
+        logger, step_name="Literature Survey")
 
     _check_expected_files([
         (os.path.join(related_info_dir, "difficulty_evaluation.md"), "difficulty evaluation"),
@@ -820,12 +878,16 @@ async def _run_parallel_round(
             if os.path.exists(proof_file) and not os.path.exists(m_proof):
                 shutil.copy2(proof_file, m_proof)
 
-            await run_model(
+            response = await run_model(
                 provider, search_prompt, output_dir, config,
                 claude_opts=claude_opts, logger=logger, tracker=tracker,
                 call_name=f"Proof Search R{i} [{provider}]",
                 instructions=proving_skill or None,
             )
+            _fallback_save_response(response,
+                [os.path.join(mdir, "proof.md"), os.path.join(mdir, "proof_status.md")],
+                [os.path.join(mdir, "error_proof_search.md")],
+                logger, step_name=f"Proof Search R{i} [{provider}]")
 
         await _asyncio.gather(*[_proof_search(p) for p in providers])
         for p in providers:
@@ -865,8 +927,12 @@ async def _run_parallel_round(
                 error_file=os.path.join(mdir, "error_proof_decompose.md"),
             )
             decomp_prompt += f"\n\nThis is round {i}. Decomposing {provider}'s proof. Write to {m_decomp}."
-            await run_agent(claude_opts, decomp_prompt, logger,
-                            tracker=tracker, call_name=f"Decomposition R{i} [{provider}]")
+            response = await run_agent(claude_opts, decomp_prompt, logger,
+                                       tracker=tracker, call_name=f"Decomposition R{i} [{provider}]")
+            _fallback_save_response(response,
+                [os.path.join(mdir, "proof_decomposition.md")],
+                [os.path.join(mdir, "error_proof_decompose.md")],
+                logger, step_name=f"Decomposition R{i} [{provider}]")
 
         await _asyncio.gather(*[_decompose(p) for p in providers])
         for p in providers:
@@ -916,8 +982,13 @@ async def _run_parallel_round(
                     error_file=os.path.join(mdir, "error_proof_verify.md"),
                 )
             verify_prompt += f"\n\nThis is round {i}. Verifying {provider}'s proof. Write to {m_verify}."
-            await run_agent(claude_opts, verify_prompt, logger,
-                            tracker=tracker, call_name=f"Verification R{i} [{provider}]")
+            response = await run_agent(claude_opts, verify_prompt, logger,
+                                       tracker=tracker, call_name=f"Verification R{i} [{provider}]")
+            err_name_inner = "error_proof_verify_direct.md" if skip_decomposition else "error_proof_verify.md"
+            _fallback_save_response(response,
+                [os.path.join(mdir, "verification_result.md")],
+                [os.path.join(mdir, err_name_inner)],
+                logger, step_name=f"Verification R{i} [{provider}]")
 
         await _asyncio.gather(*[_verify(p) for p in providers])
         err_name = "error_proof_verify_direct.md" if skip_decomposition else "error_proof_verify.md"
@@ -960,8 +1031,11 @@ async def _run_parallel_round(
         selection_file=selection_file,
         error_file=os.path.join(round_dir, "error_proof_select.md"),
     )
-    await run_agent(claude_opts, select_prompt, logger,
-                    tracker=tracker, call_name=f"Proof Selection R{i}")
+    response = await run_agent(claude_opts, select_prompt, logger,
+                               tracker=tracker, call_name=f"Proof Selection R{i}")
+    _fallback_save_response(response, [selection_file],
+        [os.path.join(round_dir, "error_proof_select.md")],
+        logger, step_name=f"Proof Selection R{i}")
     _check_expected_files([
         (selection_file, "selection report"),
         (os.path.join(round_dir, "error_proof_select.md"), "error log"),
@@ -1198,8 +1272,11 @@ async def run_proof_loop(
                 )
                 search_prompt += f"\n\nThis is round {i}. Write or refine the proof. If one approach doesn't work after much effort, try a completely different proof strategy."
 
-                await run_agent(claude_opts, search_prompt, logger, instructions=proving_skill or None,
-                                tracker=tracker, call_name=f"Proof Search R{i}")
+                response = await run_agent(claude_opts, search_prompt, logger, instructions=proving_skill or None,
+                                           tracker=tracker, call_name=f"Proof Search R{i}")
+                _fallback_save_response(response, [proof_file, proof_status_file],
+                    [os.path.join(round_dir, "error_proof_search.md")],
+                    logger, step_name=f"Proof Search R{i}")
                 _check_expected_files([
                     (proof_file, "proof"),
                     (proof_status_file, "proof status"),
@@ -1226,8 +1303,11 @@ async def run_proof_loop(
                 )
                 verify_prompt += f"\n\nThis is round {i}. Write results to {verify_result_file}."
 
-                await run_agent(claude_opts, verify_prompt, logger,
-                                tracker=tracker, call_name=f"Verification (easy) R{i}")
+                response = await run_agent(claude_opts, verify_prompt, logger,
+                                           tracker=tracker, call_name=f"Verification (easy) R{i}")
+                _fallback_save_response(response, [verify_result_file],
+                    [os.path.join(round_dir, "error_proof_verify_easy.md")],
+                    logger, step_name=f"Verification (easy) R{i}")
                 _check_expected_files([
                     (verify_result_file, "verification result"),
                     (os.path.join(round_dir, "error_proof_verify_easy.md"), "error log"),
@@ -1257,8 +1337,11 @@ async def run_proof_loop(
                 )
                 verify_prompt += f"\n\nThis is round {i}. Write results to {verify_result_file}."
 
-                await run_agent(claude_opts, verify_prompt, logger,
-                                tracker=tracker, call_name=f"Verification (direct) R{i}")
+                response = await run_agent(claude_opts, verify_prompt, logger,
+                                           tracker=tracker, call_name=f"Verification (direct) R{i}")
+                _fallback_save_response(response, [verify_result_file],
+                    [os.path.join(round_dir, "error_proof_verify_direct.md")],
+                    logger, step_name=f"Verification (direct) R{i}")
                 _check_expected_files([
                     (verify_result_file, "verification result"),
                     (os.path.join(round_dir, "error_proof_verify_direct.md"), "error log"),
@@ -1292,8 +1375,11 @@ async def run_proof_loop(
                     )
                     decomp_prompt += f"\n\nThis is round {i}. Write decomposition to {decomp_file}."
 
-                    await run_agent(claude_opts, decomp_prompt, logger,
-                                    tracker=tracker, call_name=f"Decomposition R{i}")
+                    response = await run_agent(claude_opts, decomp_prompt, logger,
+                                               tracker=tracker, call_name=f"Decomposition R{i}")
+                    _fallback_save_response(response, [decomp_file],
+                        [os.path.join(round_dir, "error_proof_decompose.md")],
+                        logger, step_name=f"Decomposition R{i}")
                     _check_expected_files([
                         (decomp_file, "decomposition"),
                         (os.path.join(round_dir, "error_proof_decompose.md"), "error log"),
@@ -1315,8 +1401,11 @@ async def run_proof_loop(
                 )
                 verify_prompt += f"\n\nThis is round {i}. Write results to {verify_result_file}."
 
-                await run_agent(claude_opts, verify_prompt, logger,
-                                tracker=tracker, call_name=f"Verification R{i}")
+                response = await run_agent(claude_opts, verify_prompt, logger,
+                                           tracker=tracker, call_name=f"Verification R{i}")
+                _fallback_save_response(response, [verify_result_file],
+                    [os.path.join(round_dir, "error_proof_verify.md")],
+                    logger, step_name=f"Verification R{i}")
                 _check_expected_files([
                     (verify_result_file, "verification result"),
                     (os.path.join(round_dir, "error_proof_verify.md"), "error log"),
@@ -1547,8 +1636,11 @@ async def main():
             summary_file=summary_file,
             error_file=os.path.join(output_dir, "error_proof_effort_summary.md"),
         )
-        await run_agent(claude_opts, summary_prompt, logger=summary_logger,
-                        tracker=tracker, call_name="Proof Effort Summary")
+        response = await run_agent(claude_opts, summary_prompt, logger=summary_logger,
+                                    tracker=tracker, call_name="Proof Effort Summary")
+        _fallback_save_response(response, [summary_file],
+            [os.path.join(output_dir, "error_proof_effort_summary.md")],
+            summary_logger, step_name="Proof Effort Summary")
         _check_expected_files([
             (summary_file, "proof effort summary"),
             (os.path.join(output_dir, "error_proof_effort_summary.md"), "error log"),

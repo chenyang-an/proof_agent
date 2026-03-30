@@ -64,6 +64,7 @@ async def run_claude_agent(
         return subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             cwd=working_dir,
             env=env,
@@ -77,7 +78,7 @@ async def run_claude_agent(
         result = await asyncio.get_event_loop().run_in_executor(None, _call)
     except Exception as exc:
         if logger:
-            logger.log(f"[Claude] ERROR: {exc}")
+            logger.log(f"[Claude] EXCEPTION: {type(exc).__name__}: {exc}")
         if tracker:
             elapsed = (datetime.now() - start).total_seconds()
             tracker.record(call_name or "claude", 0, 0, elapsed,
@@ -85,6 +86,10 @@ async def run_claude_agent(
         return ""
 
     elapsed = (datetime.now() - start).total_seconds()
+
+    # Log stderr if present (contains error messages from CLI)
+    if result.stderr and result.stderr.strip() and logger:
+        logger.log(f"[Claude] stderr:\n{result.stderr.strip()}")
 
     # --- Parse JSON output ---
     response = ""
@@ -101,6 +106,8 @@ async def run_claude_agent(
     except (json.JSONDecodeError, ValueError) as exc:
         if logger:
             logger.log(f"[Claude] JSON parse error: {exc}")
+            if result.stdout.strip():
+                logger.log(f"[Claude] Raw stdout (first 1000 chars): {result.stdout.strip()[:1000]}")
         response = result.stdout.strip()
 
     if result.returncode != 0 and logger:
@@ -159,6 +166,7 @@ async def run_codex_agent(
         return subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             cwd=working_dir,
         )
@@ -171,7 +179,7 @@ async def run_codex_agent(
         result = await asyncio.get_event_loop().run_in_executor(None, _call)
     except Exception as exc:
         if logger:
-            logger.log(f"[Codex] ERROR: {exc}")
+            logger.log(f"[Codex] EXCEPTION: {type(exc).__name__}: {exc}")
         if tracker:
             elapsed = (datetime.now() - start).total_seconds()
             tracker.record(call_name or "codex", 0, 0, elapsed,
@@ -179,6 +187,10 @@ async def run_codex_agent(
         return ""
 
     elapsed = (datetime.now() - start).total_seconds()
+
+    # Log stderr if present (contains error messages from CLI)
+    if result.stderr and result.stderr.strip() and logger:
+        logger.log(f"[Codex] stderr:\n{result.stderr.strip()}")
 
     # --- Parse JSONL output (adapted from test_call.py:41-67) ---
     response = ""
@@ -201,8 +213,13 @@ async def run_codex_agent(
     except (json.JSONDecodeError, ValueError) as exc:
         if logger:
             logger.log(f"[Codex] JSON parse error: {exc}")
+            if result.stdout.strip():
+                logger.log(f"[Codex] Raw stdout (first 1000 chars): {result.stdout.strip()[:1000]}")
         # Fall back to raw stdout as response
         response = result.stdout.strip()
+
+    if result.returncode != 0 and logger:
+        logger.log(f"[Codex] Non-zero exit code: {result.returncode}")
 
     if logger:
         logger.log(f"[Codex] Completed {call_name} in {elapsed:.0f}s "
@@ -257,6 +274,7 @@ async def run_gemini_agent(
         return subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             cwd=working_dir,
             env=env,
@@ -270,7 +288,7 @@ async def run_gemini_agent(
         result = await asyncio.get_event_loop().run_in_executor(None, _call)
     except Exception as exc:
         if logger:
-            logger.log(f"[Gemini] ERROR: {exc}")
+            logger.log(f"[Gemini] EXCEPTION: {type(exc).__name__}: {exc}")
         if tracker:
             elapsed = (datetime.now() - start).total_seconds()
             tracker.record(call_name or "gemini", 0, 0, elapsed,
@@ -278,6 +296,10 @@ async def run_gemini_agent(
         return ""
 
     elapsed = (datetime.now() - start).total_seconds()
+
+    # Log stderr if present (contains error messages from CLI)
+    if result.stderr and result.stderr.strip() and logger:
+        logger.log(f"[Gemini] stderr:\n{result.stderr.strip()}")
 
     # --- Parse JSON output (adapted from test_call.py:74-121) ---
     response = ""
@@ -296,7 +318,12 @@ async def run_gemini_agent(
     except (json.JSONDecodeError, ValueError) as exc:
         if logger:
             logger.log(f"[Gemini] JSON parse error: {exc}")
+            if result.stdout.strip():
+                logger.log(f"[Gemini] Raw stdout (first 1000 chars): {result.stdout.strip()[:1000]}")
         response = result.stdout.strip()
+
+    if result.returncode != 0 and logger:
+        logger.log(f"[Gemini] Non-zero exit code: {result.returncode}")
 
     if logger:
         logger.log(f"[Gemini] Completed {call_name} in {elapsed:.0f}s "

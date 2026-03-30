@@ -1,19 +1,12 @@
 # Mathematical Literature Survey Task
 
+> **Agentic task.** Read the input files first, then think, plan, and work — use bash, computational tools, or any available resources as needed. Write the output files using tool calls according to the instructions. All input/output file paths and format specifications are at the end of this prompt.
+
 ## Overview
 
 You are a research mathematician preparing to tackle a problem. Before attempting any proof, you must conduct a thorough literature survey — just as an expert would before sitting down to work on a hard problem.
 
 Your goal is NOT to prove the problem. Your goal is to **build the knowledge base** that will make the proof possible. The proof will be attempted by a separate agent who will read your survey.
-
-## Problem
-
-The problem statement is at:
-```
-{problem_file}
-```
-
-Read it carefully.
 
 ## Your Task
 
@@ -126,7 +119,29 @@ Search your knowledge deeply and write to `{related_info_dir}/related_theorems.m
 
 ---
 
-## Output Requirements
+## Critical Instructions
+
+- **If any tool or script you run takes longer than 3 minutes, stop it and try a different approach or skip that computation.**
+- **Depth over breadth.** A shallow list of 50 theorems is less useful than a deep analysis of the 5 most relevant ones. For each result you cite, explain precisely WHY it matters for THIS problem and HOW it would be used. Same for paper selection.
+- **Be precise.** State theorems with full hypotheses. Vague references ("by a standard result...") are useless to the proof agent.
+- **Be honest about uncertainty.** If you're not sure whether a theorem applies, say so and explain what would need to be checked.
+- **Think adversarially.** Actively look for reasons the problem might be harder than it looks. The proof agent needs to know where the traps are.
+- **Focus on actionability.** Everything you write should help the proof agent make better decisions. If a piece of information doesn't help them prove the problem, leave it out.
+
+---
+
+## HERE ARE THE INPUT FILE PATHS:
+
+### Problem
+
+The problem statement is at:
+```
+{problem_file}
+```
+
+Read it carefully.
+
+## HERE ARE THE OUTPUT FILE PATHS:
 
 Create the directory `{related_info_dir}/` if it does not exist, and write these files:
 
@@ -155,12 +170,3 @@ If you need to create temporary files during your research (e.g., scratch comput
 {output_dir}/tmp/
 ```
 Create this directory if it does not exist.
-
-## Critical Instructions
-
-- **If any tool or script you run takes longer than 3 minutes, stop it and try a different approach or skip that computation.**
-- **Depth over breadth.** A shallow list of 50 theorems is less useful than a deep analysis of the 5 most relevant ones. For each result you cite, explain precisely WHY it matters for THIS problem and HOW it would be used. Same for paper selection.
-- **Be precise.** State theorems with full hypotheses. Vague references ("by a standard result...") are useless to the proof agent.
-- **Be honest about uncertainty.** If you're not sure whether a theorem applies, say so and explain what would need to be checked.
-- **Think adversarially.** Actively look for reasons the problem might be harder than it looks. The proof agent needs to know where the traps are.
-- **Focus on actionability.** Everything you write should help the proof agent make better decisions. If a piece of information doesn't help them prove the problem, leave it out.
